@@ -15,7 +15,7 @@ The easiest way to create a mod is through the in-game tools:
 3. Fill in the prompted fields (name, author, description, version, tags, etc.)
 4. Your mod folder is automatically generated in `ModDev/your_mod_id/` with a ready-to-use `mod.json` and `main.rb` template
 5. Edit `main.rb` with your mod code
-6. Upload the folder to this repo (see [Uploading Your Mod](#uploading-your-mod) below)
+6. Publish using `publish_mod.bat` (see below)
 
 You can also use **Modder Tools** > **Update Mod** to edit any field later, and **Delete Mod** to remove a mod from `ModDev/`.
 
@@ -23,9 +23,10 @@ You can also use **Modder Tools** > **Update Mod** to edit any field later, and 
 
 If you prefer to set things up yourself:
 
-1. Create a folder in this repo named after your mod ID (lowercase, underscores only — e.g. `my_cool_mod`)
-2. Create a `mod.json` file inside it (see format below)
+1. Create a folder named after your mod ID (lowercase, underscores only — e.g. `my_cool_mod`)
+2. Create a `mod.json` file inside it (see [mod.json format](#modjson-format) below)
 3. Create a `main.rb` file with your mod code
+4. Upload the folder to this repo
 
 #### Folder structure
 
@@ -37,7 +38,79 @@ your_mod_id/
   other_file.rb   # Optional - additional scripts
 ```
 
-#### mod.json format
+---
+
+## Publishing Your Mod
+
+### Using publish_mod.bat (Recommended)
+
+A `publish_mod.bat` script is included in your `ModDev/` folder. It handles everything automatically.
+
+**Requirements:** [Git](https://git-scm.com/downloads) must be installed (select "Add to PATH" during setup).
+
+Just double-click `publish_mod.bat`, pick your mod, and it pushes to GitHub.
+
+### Use Case 1: Publishing a New Mod
+
+```
+1. Create your mod in-game (Modder Tools > Create Mod)
+2. Edit ModDev/your_mod_id/main.rb with your code
+3. Double-click publish_mod.bat
+4. Select your mod from the list
+5. Confirm — it gets pushed to GitHub
+6. Players can now see and install it from the in-game Mod Browser
+```
+
+### Use Case 2: Updating an Existing Mod
+
+```
+1. Edit your mod's code in ModDev/your_mod_id/
+2. Update the version in mod.json (in-game: Modder Tools > Update Mod > Version)
+3. Double-click publish_mod.bat
+4. Select your mod — it detects changes and pushes the update
+5. Players will see "UPD" next to your mod in the Mod Browser
+```
+
+### Use Case 3: Full Modder Workflow
+
+```
+Day 1 — Create
+  - Open game > Mod Manager > Modder Tools > Create Mod
+  - Fill in: name, author, description, tags
+  - Edit ModDev/my_mod/main.rb with your code
+  - Run publish_mod.bat to push v1.0.0
+
+Day 2 — Bug fix
+  - Fix the bug in main.rb
+  - In-game: Modder Tools > Update Mod > Version > change to 1.0.1
+  - Run publish_mod.bat — pushes the update
+
+Day 5 — Add settings
+  - In-game: Modder Tools > Update Mod > add settings/tags/dependencies
+  - Update main.rb to use the new settings
+  - Bump version to 1.1.0
+  - Run publish_mod.bat
+
+Later — Add dependency
+  - Your mod now needs "some_other_mod" to work
+  - In-game: Modder Tools > Update Mod > Dependencies > pick from list
+  - Bump version, run publish_mod.bat
+  - Players who install your mod will see the dependency warning
+```
+
+### Manual Upload (No Script)
+
+If you don't want to use the script:
+
+- Fork this repo on GitHub
+- Add/update your mod folder
+- Open a Pull Request
+
+Or if you have write access, push directly.
+
+---
+
+## mod.json Format
 
 ```json
 {
@@ -56,20 +129,18 @@ your_mod_id/
 
 All fields are required. `dependencies`, `incompatible`, and `settings` can be empty arrays.
 
-#### Settings (optional)
+### Settings (optional)
 
-If your mod has configurable options, add them to the `settings` array. Players can change these in-game via the Mod Manager.
+If your mod has configurable options, players can change these in-game via the Mod Manager.
 
-```json
-"settings": [
-  { "type": "toggle", "key": "enable_feature", "label": "Enable Feature", "default": true },
-  { "type": "enum", "key": "difficulty", "label": "Difficulty", "options": ["Easy", "Normal", "Hard"], "default": 1 },
-  { "type": "slider", "key": "speed", "label": "Speed", "min": 1, "max": 100, "default": 50 },
-  { "type": "number", "key": "max_items", "label": "Max Items", "min": 1, "max": 999, "default": 99 }
-]
-```
+| Type | Example |
+|------|---------|
+| Toggle | `{ "type": "toggle", "key": "enable_feature", "label": "Enable Feature", "default": true }` |
+| Enum | `{ "type": "enum", "key": "difficulty", "label": "Difficulty", "options": ["Easy", "Normal", "Hard"], "default": 1 }` |
+| Slider | `{ "type": "slider", "key": "speed", "label": "Speed", "min": 1, "max": 100, "default": 50 }` |
+| Number | `{ "type": "number", "key": "max_items", "label": "Max Items", "min": 1, "max": 999, "default": 99 }` |
 
-#### Dependencies and Incompatibilities
+### Dependencies and Incompatibilities
 
 ```json
 "dependencies": [
@@ -78,23 +149,9 @@ If your mod has configurable options, add them to the `settings` array. Players 
 "incompatible": ["conflicting_mod_id"]
 ```
 
-When adding these via the in-game Modder Tools, you can pick from a list of all known mods (installed, in development, and from this repo) instead of typing IDs manually.
+When adding these via the in-game Modder Tools, you can pick from a list of all known mods instead of typing IDs manually.
 
----
-
-## Uploading Your Mod
-
-- Fork this repo
-- Add your mod folder (the one from `ModDev/`)
-- Open a Pull Request
-
-Or if you have direct write access, push your folder directly.
-
-**Updating your mod:** Change the `version` field in `mod.json` and push the updated files. Players will see an update notification in the Mod Browser.
-
----
-
-## Valid Tags
+### Valid Tags
 
 `Gameplay`, `Visual`, `Audio`, `QoL`, `Balance`, `Difficulty`, `Fusion`, `Multiplayer`, `UI`, `Cosmetic`, `Bug Fix`, `Content`
 
