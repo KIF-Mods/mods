@@ -1,6 +1,6 @@
 # KIF Mods Repository
 
-This is the official mod repository for **KIF Multiplayer** (Kuray's Infinite Fusion). Mods listed here appear in the in-game **Mod Browser** for all players.
+This is the official mod repository for **KIF Multiplayer** (Kuray's Infinite Fusion). Mods listed here appear in the in-game **Mod Browser** for all players !
 
 ---
 
