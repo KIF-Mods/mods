@@ -1,0 +1,164 @@
+# .github/workflows/protect-mods.yml
+# Prevents deletion or modification of mods by anyone other than the original author.
+# Place this file at: .github/workflows/protect-mods.yml in the KIF-Mods/mods repo.
+
+name: Protect Mods
+
+on:
+  pull_request:
+    branches: [main, master]
+  push:
+    branches: [main, master]
+
+jobs:
+  check-ownership:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout current
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check mod ownership
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_EVENT: ${{ github.event_name }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          set -e
+
+          # Determine who made this change
+          if [ "$GITHUB_EVENT" = "pull_request" ]; then
+            ACTOR="$PR_AUTHOR"
+          else
+            ACTOR="$GITHUB_ACTOR"
+          fi
+
+          echo "Change author: $ACTOR"
+          echo ""
+
+          # Get list of deleted files compared to previous commit
+          DELETED=$(git diff --name-only --diff-filter=D HEAD~1 HEAD 2>/dev/null || true)
+
+          if [ -z "$DELETED" ]; then
+            echo "No deleted files. OK."
+            exit 0
+          fi
+
+          echo "Deleted files:"
+          echo "$DELETED"
+          echo ""
+
+          # Extract unique mod folders that had files deleted
+          DELETED_MODS=$(echo "$DELETED" | grep '/' | cut -d'/' -f1 | sort -u)
+
+          if [ -z "$DELETED_MODS" ]; then
+            echo "No mod folders affected. OK."
+            exit 0
+          fi
+
+          BLOCKED=false
+
+          for MOD_FOLDER in $DELETED_MODS; do
+            # Skip non-mod folders
+            if [ "$MOD_FOLDER" = ".github" ] || [ "$MOD_FOLDER" = "_kif_multiplayer" ]; then
+              continue
+            fi
+
+            echo "Checking deleted mod folder: $MOD_FOLDER"
+
+            # Read the mod.json author from the previous commit (before deletion)
+            MOD_AUTHOR=$(git show HEAD~1:"$MOD_FOLDER/mod.json" 2>/dev/null | grep -o '"author"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*:.*"\(.*\)"/\1/' || true)
+
+            if [ -z "$MOD_AUTHOR" ]; then
+              echo "  WARNING: Could not read author from mod.json. Allowing."
+              continue
+            fi
+
+            echo "  Mod author: $MOD_AUTHOR"
+            echo "  Actor:      $ACTOR"
+
+            # Case-insensitive comparison
+            MOD_LOWER=$(echo "$MOD_AUTHOR" | tr '[:upper:]' '[:lower:]')
+            ACTOR_LOWER=$(echo "$ACTOR" | tr '[:upper:]' '[:lower:]')
+
+            if [ "$MOD_LOWER" != "$ACTOR_LOWER" ]; then
+              echo ""
+              echo "::error::BLOCKED: '$ACTOR' tried to delete '$MOD_FOLDER' but the author is '$MOD_AUTHOR'. Only the original author can delete their mod."
+              BLOCKED=true
+            else
+              echo "  OK — author match confirmed."
+            fi
+
+            echo ""
+          done
+
+          if [ "$BLOCKED" = true ]; then
+            echo ""
+            echo "One or more deletions were blocked. Only mod authors can delete their own mods."
+            exit 1
+          fi
+
+          echo "All ownership checks passed."
+
+      - name: Check mod modifications
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_EVENT: ${{ github.event_name }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          set -e
+
+          if [ "$GITHUB_EVENT" = "pull_request" ]; then
+            ACTOR="$PR_AUTHOR"
+          else
+            ACTOR="$GITHUB_ACTOR"
+          fi
+
+          # Get list of modified files (not added — new mods are fine)
+          MODIFIED=$(git diff --name-only --diff-filter=M HEAD~1 HEAD 2>/dev/null || true)
+
+          if [ -z "$MODIFIED" ]; then
+            echo "No modified files. OK."
+            exit 0
+          fi
+
+          # Extract unique mod folders that were modified
+          MOD_FOLDERS=$(echo "$MODIFIED" | grep '/' | cut -d'/' -f1 | sort -u)
+
+          if [ -z "$MOD_FOLDERS" ]; then
+            echo "No mod folders modified. OK."
+            exit 0
+          fi
+
+          BLOCKED=false
+
+          for MOD_FOLDER in $MOD_FOLDERS; do
+            if [ "$MOD_FOLDER" = ".github" ]; then
+              continue
+            fi
+
+            # Read author from current mod.json (it still exists for modifications)
+            MOD_AUTHOR=""
+            if [ -f "$MOD_FOLDER/mod.json" ]; then
+              MOD_AUTHOR=$(grep -o '"author"[[:space:]]*:[[:space:]]*"[^"]*"' "$MOD_FOLDER/mod.json" | head -1 | sed 's/.*:.*"\(.*\)"/\1/')
+            fi
+
+            if [ -z "$MOD_AUTHOR" ]; then
+              continue
+            fi
+
+            MOD_LOWER=$(echo "$MOD_AUTHOR" | tr '[:upper:]' '[:lower:]')
+            ACTOR_LOWER=$(echo "$ACTOR" | tr '[:upper:]' '[:lower:]')
+
+            if [ "$MOD_LOWER" != "$ACTOR_LOWER" ]; then
+              echo "::error::BLOCKED: '$ACTOR' tried to modify '$MOD_FOLDER' but the author is '$MOD_AUTHOR'. Only the original author can modify their mod."
+              BLOCKED=true
+            fi
+          done
+
+          if [ "$BLOCKED" = true ]; then
+            exit 1
+          fi
+
+          echo "All modification checks passed."
