@@ -1,11 +1,10 @@
-
 <p align="center">
   <img src="https://img.shields.io/badge/KIF%20Mod%20Manager-v1.0.0-green?style=for-the-badge" alt="Mod Manager v1.0.0">
 </p>
 
 # KIF Mod Manager
 
-The **KIF Mod Manager** is a built-in mod management system for [Kuray's Infinite Fusion](https://www.kurayinfinitefusion.com/). Browse, install, update, and manage mods entirely from within the game — no manual file copying needed.
+The **KIF Mod Manager** is a built-in mod management system for Kuray's Infinite Fusion (KIF). Browse, install, update, and manage mods entirely from within the game — no manual file copying needed.
 
 All community mods are hosted on the [**KIF-Mods/mods**](https://github.com/KIF-Mods/mods) GitHub repository.
 
