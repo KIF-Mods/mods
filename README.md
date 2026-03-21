@@ -310,5 +310,5 @@ Game Root/
 ---
 
 <p align="center">
-  <i>Part of <a href="https://www.kurayinfinitefusion.com/">Kuray's Infinite Fusion</a> — made by the community, for the community.</i>
+  <i>Part of Kuray's Infinite Fusion — made by the community, for the community.</i>
 </p>
