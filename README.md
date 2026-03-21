@@ -4,8 +4,6 @@
   <img src="https://img.shields.io/badge/Mod%20Manager-v1.0.0-green?style=for-the-badge" alt="Mod Manager v1.0.0">
 </p>
 
-> **Sprite servers are currently down.** If you're seeing white question marks instead of sprites, download the pre-loaded version from [MediaFire](https://www.mediafire.com/folder/eo2b1qmi5ukyd/Kuray_Infinite_Fusion).
-
 ---
 
 # Kuray's Infinite Fusion (KIF)
