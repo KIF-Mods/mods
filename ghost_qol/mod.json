@@ -1,0 +1,1 @@
+{"name":"Ghost QOL","id":"ghost_qol","version":"1.0.0","author":"t-Ghost-t","description":"A variety of QoL patches.","tags":["QoL","UI","Visual"],"dependencies":[],"incompatible":[],"settings":[],"scripts":["main.rb"],"icon":"icon.png"}
