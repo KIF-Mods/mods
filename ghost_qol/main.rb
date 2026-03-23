@@ -188,8 +188,14 @@ module GhostQoL
         end
 
         # --- Integration with Game Startup ---
-        # We initialize on script load to ensure features are registered before the intro starts.
-        GhostQoL.init
+        # Initialize if ModSettingsMenu is available. If not, queue for when it loads.
+        # This handles both legacy (alphabetical) and managed (Mod Manager) loading.
+        if defined?(ModSettingsMenu)
+            GhostQoL.init
+        else
+            $MOD_SETTINGS_PENDING_REGISTRATIONS ||= []
+            $MOD_SETTINGS_PENDING_REGISTRATIONS << proc { GhostQoL.init }
+        end
 
         # Also re-initialize on save load to ensure defaults are present if the save was missing them.
         EventHandlers.add(:on_load_save_file, :ghost_qol_init) do |save_data|
