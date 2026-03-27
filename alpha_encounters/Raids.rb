@@ -302,7 +302,7 @@ def pbWildBattleCore(*args)
   $PokemonTemp.battleRewards ||= []
   for pokemon in foeParty
     alpha = false
-    if RelicSystem.active?(:ALPHA_RELIC)
+    if defined?(RelicSystem) and RelicSystem.active?(:ALPHA_RELIC)
       if rand(150) < alpha_chance
         alpha= true
         alpha_count += 1
@@ -317,7 +317,7 @@ def pbWildBattleCore(*args)
       end
     end
     if alpha == true
-      if RelicSystem.active?(:ALPHA_RELIC)
+      if defined?(RelicSystem) and RelicSystem.active?(:ALPHA_RELIC)
         pokemon.shiny=(true)
       end
       make_alpha(pokemon)
