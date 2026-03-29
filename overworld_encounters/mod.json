@@ -1,0 +1,27 @@
+{
+  "name": "Overworld Encounters",
+  "id": "overworld_encounters",
+  "version": "2.2.5",
+  "author": "jov4n",
+  "description": [
+    "Adds Pokemon that roam the overworld as visible encounters.",
+    "Features shiny spawns, fusion encounters, horde battles (2v1),",
+    "outbreak events with Shiny Panic, and highly configurable settings.",
+    "",
+    "Repo: github.com/jov4n/KurayOverworldEncounters"
+  ],
+  "tags": ["Gameplay", "Content"],
+  "dependencies": [],
+  "incompatible": [],
+  "settings": [],
+  "scripts": [
+    "000_VOE_Utils.rb",
+    "000b_VOE_Settings.rb",
+    "001_VOE_Config.rb",
+    "002_VOE_Pokemon Behavior.rb",
+    "003_VOE_Event Handlers.rb",
+    "004_VOE_Movement.rb",
+    "005_VOE_VersionManager.rb"
+  ],
+  "icon": "icon.png"
+}
