@@ -53,143 +53,111 @@ class VOESettings
     0 => 5,
   }
 
-  # Dynamic Settings via ModSettings
+  MOD_ID = "overworld_encounters"
+
+  SETTING_MAP = {
+    :DISABLE_SETTINGS        => { :key => "voe_disable_settings",        :type => :bool },
+    :LOG_SPAWNS              => { :key => "voe_log_spawns",              :type => :bool },
+    :SHINY_RATE              => { :key => "voe_shiny_rate",              :type => :num },
+    :MAX_DISTANCE            => { :key => "voe_max_distance",            :type => :num },
+    :DELETE_EVENTS           => { :key => "voe_delete_events",           :type => :bool },
+    :DELETE_SHINY            => { :key => "voe_delete_shiny",            :type => :bool },
+    :BRIGHT_SHINY            => { :key => "voe_brt_shiny",              :type => :bool },
+    :COLORFUL_TEXT           => { :key => "voe_colorful_text",           :type => :bool },
+    :WATER_SPAWNS_ONLY_SURFING => { :key => "voe_water_surf_only",      :type => :bool },
+    :DIFFERENT_ENCOUNTERS    => { :key => "voe_diff_enc",                :type => :bool },
+    :ENCOUNTER_TABLE         => { :key => "voe_enc_table",              :type => :num },
+    :SPAWN_ANIMATION         => { :key => "voe_spawn_anim",             :type => :num },
+    :SHINY_ANIMATION         => { :key => "voe_shiny_anim",             :type => :num },
+    :MAX_ENCOUNTERS          => { :key => "voe_max_encounters",          :type => :num },
+    :FUSION_ENCOUNTERS       => { :key => "voe_fusion_encounters",       :type => :bool },
+    :FUSION_RATE             => { :key => "voe_fusion_rate",             :type => :num },
+    :HORDE_BATTLES           => { :key => "voe_horde_battles",           :type => :bool },
+    :HORDE_DISTANCE          => { :key => "voe_horde_distance",          :type => :num },
+    :SPAWN_ON_LOAD           => { :key => "voe_spawn_on_load",           :type => :bool },
+    :INITIAL_SPAWN_COUNT     => { :key => "voe_initial_spawn_count",     :type => :num },
+    :OUTBREAK_ENABLED        => { :key => "voe_outbreak_enabled",        :type => :bool },
+    :OUTBREAK_DURATION       => { :key => "voe_outbreak_duration",       :type => :duration },
+    :OUTBREAK_TYPE           => { :key => "voe_outbreak_type",           :type => :outbreak_type },
+    :OUTBREAK_SHINY_MULT     => { :key => "voe_outbreak_shiny_mult",     :type => :num },
+    :OUTBREAK_NO_SHINY_DESPAWN => { :key => "voe_outbreak_no_shiny_despawn", :type => :bool },
+    :OUTBREAK_SPAWN_COUNT    => { :key => "voe_outbreak_spawn_count",    :type => :num },
+    :OUTBREAK_MAX_OVERRIDE   => { :key => "voe_outbreak_max_override",   :type => :num },
+    :OUTBREAK_SPAWN_RATE     => { :key => "voe_outbreak_spawn_rate",     :type => :num },
+    :OUTBREAK_RADIUS         => { :key => "voe_outbreak_radius",         :type => :num },
+    :SHINY_PANIC_ENABLED     => { :key => "voe_outbreak_shiny_panic",    :type => :bool },
+  }
+
+  DEFAULTS = {
+    :DISABLE_SETTINGS => false, :LOG_SPAWNS => false, :SHINY_RATE => 8192,
+    :MAX_DISTANCE => 8, :DELETE_EVENTS => true, :DELETE_SHINY => false,
+    :BRIGHT_SHINY => true, :COLORFUL_TEXT => true, :WATER_SPAWNS_ONLY_SURFING => true,
+    :DIFFERENT_ENCOUNTERS => false, :ENCOUNTER_TABLE => 1, :SPAWN_ANIMATION => 2,
+    :SHINY_ANIMATION => 2, :MAX_ENCOUNTERS => 5, :FUSION_ENCOUNTERS => true,
+    :FUSION_RATE => 10, :HORDE_BATTLES => true, :HORDE_DISTANCE => 2,
+    :SPAWN_ON_LOAD => false, :INITIAL_SPAWN_COUNT => 6,
+    :OUTBREAK_ENABLED => true, :OUTBREAK_DURATION => 10, :OUTBREAK_TYPE => 0,
+    :OUTBREAK_SHINY_MULT => 1, :OUTBREAK_NO_SHINY_DESPAWN => true,
+    :OUTBREAK_SPAWN_COUNT => 6, :OUTBREAK_MAX_OVERRIDE => 12,
+    :OUTBREAK_SPAWN_RATE => 200, :OUTBREAK_RADIUS => 15, :SHINY_PANIC_ENABLED => true,
+  }
+
+  DURATION_MAP = { "5 Minutes" => 5, "10 Minutes" => 10, "15 Minutes" => 15 }
+  OUTBREAK_TYPE_MAP = { "Mixed Species" => 0, "Same Species" => 1 }
+
+  def self._read_mm_setting(key)
+    return nil unless defined?($mod_manager_settings) && $mod_manager_settings.is_a?(Hash)
+    settings = $mod_manager_settings[MOD_ID]
+    return nil unless settings.is_a?(Hash)
+    return nil unless settings.key?(key)
+    settings[key]
+  end
+
+  def self._coerce(val, type)
+    case type
+    when :bool
+      return val == true || val == 1
+    when :num
+      return val if val.is_a?(Numeric)
+    when :duration
+      return DURATION_MAP[val] if val.is_a?(String) && DURATION_MAP[val]
+      return [5, 10, 15][val] if val.is_a?(Integer) && val.between?(0, 2)
+      return val if val.is_a?(Numeric)
+    when :outbreak_type
+      return OUTBREAK_TYPE_MAP[val] if val.is_a?(String) && OUTBREAK_TYPE_MAP.key?(val)
+      return val if val.is_a?(Integer)
+    end
+    nil
+  end
+
+  # Dynamic Settings — checks mod manager, then legacy ModSettingsMenu, then defaults
   def self.const_missing(name)
-    begin
-      if defined?(ModSettingsMenu) && ModSettingsMenu.respond_to?(:get)
-        case name
-        when :DISABLE_SETTINGS
-          val = ModSettingsMenu.get(:voe_disable_settings)
-          return (val == 1) if val != nil
-        when :LOG_SPAWNS
-          val = ModSettingsMenu.get(:voe_log_spawns)
-          return (val == 1) if val != nil
-        when :SHINY_RATE
-          val = ModSettingsMenu.get(:voe_shiny_rate)
-          return val if val != nil && val.is_a?(Numeric)
-        when :MAX_DISTANCE
-          val = ModSettingsMenu.get(:voe_max_distance)
-          return val if val != nil && val.is_a?(Numeric)
-        when :DELETE_EVENTS
-          val = ModSettingsMenu.get(:voe_delete_events)
-          return (val == 1) if val != nil
-        when :DELETE_SHINY
-          val = ModSettingsMenu.get(:voe_delete_shiny)
-          return (val == 1) if val != nil
-        when :BRIGHT_SHINY
-          val = ModSettingsMenu.get(:voe_brt_shiny)
-          return (val == 1) if val != nil
-        when :COLORFUL_TEXT
-          val = ModSettingsMenu.get(:voe_colorful_text)
-          return (val == 1) if val != nil
-        when :WATER_SPAWNS_ONLY_SURFING
-          val = ModSettingsMenu.get(:voe_water_surf_only)
-          return (val == 1) if val != nil
-        when :DIFFERENT_ENCOUNTERS
-          val = ModSettingsMenu.get(:voe_diff_enc)
-          return (val == 1) if val != nil
-        when :ENCOUNTER_TABLE
-          val = ModSettingsMenu.get(:voe_enc_table)
-          return val if val != nil && val.is_a?(Numeric)
-        when :SPAWN_ANIMATION
-          val = ModSettingsMenu.get(:voe_spawn_anim)
-          return val if val != nil && val.is_a?(Numeric)
-        when :SHINY_ANIMATION
-          val = ModSettingsMenu.get(:voe_shiny_anim)
-          return val if val != nil && val.is_a?(Numeric)
-        when :MAX_ENCOUNTERS
-          val = ModSettingsMenu.get(:voe_max_encounters)
-          return val if val != nil && val.is_a?(Numeric)
-        when :FUSION_ENCOUNTERS
-          val = ModSettingsMenu.get(:voe_fusion_encounters)
-          return (val == 1) if val != nil
-        when :FUSION_RATE
-          val = ModSettingsMenu.get(:voe_fusion_rate)
-          return val if val != nil && val.is_a?(Numeric)
-        when :HORDE_BATTLES
-          val = ModSettingsMenu.get(:voe_horde_battles)
-          return (val == 1) if val != nil
-        when :HORDE_DISTANCE
-          val = ModSettingsMenu.get(:voe_horde_distance)
-          return val if val != nil && val.is_a?(Numeric)
-        when :SPAWN_ON_LOAD
-          val = ModSettingsMenu.get(:voe_spawn_on_load)
-          return (val == 1) if val != nil
-        when :INITIAL_SPAWN_COUNT
-          val = ModSettingsMenu.get(:voe_initial_spawn_count)
-          return val if val != nil && val.is_a?(Numeric)
-        # Outbreak settings
-        when :OUTBREAK_ENABLED
-          val = ModSettingsMenu.get(:voe_outbreak_enabled)
-          return (val == 1) if val != nil
-        when :OUTBREAK_DURATION
-          val = ModSettingsMenu.get(:voe_outbreak_duration)
-          return [5, 10, 15][val || 1] if val != nil
-        when :OUTBREAK_TYPE
-          val = ModSettingsMenu.get(:voe_outbreak_type)
-          return val if val != nil  # 0 = Mixed, 1 = Same
-        when :OUTBREAK_SHINY_MULT
-          val = ModSettingsMenu.get(:voe_outbreak_shiny_mult)
-          return val if val != nil && val.is_a?(Numeric)
-        when :OUTBREAK_NO_SHINY_DESPAWN
-          val = ModSettingsMenu.get(:voe_outbreak_no_shiny_despawn)
-          return (val == 1) if val != nil
-        when :OUTBREAK_SPAWN_COUNT
-          val = ModSettingsMenu.get(:voe_outbreak_spawn_count)
-          return val if val != nil && val.is_a?(Numeric)
-        when :OUTBREAK_MAX_OVERRIDE
-          val = ModSettingsMenu.get(:voe_outbreak_max_override)
-          return val if val != nil && val.is_a?(Numeric)
-        when :OUTBREAK_SPAWN_RATE
-          val = ModSettingsMenu.get(:voe_outbreak_spawn_rate)
-          return val if val != nil && val.is_a?(Numeric)
-        when :OUTBREAK_RADIUS
-          val = ModSettingsMenu.get(:voe_outbreak_radius)
-          return val if val != nil && val.is_a?(Numeric)
-        when :SHINY_PANIC_ENABLED
-          val = ModSettingsMenu.get(:voe_outbreak_shiny_panic)
-          return (val == 1) if val != nil
+    mapping = SETTING_MAP[name]
+    if mapping
+      begin
+        # 1. Try mod manager settings ($mod_manager_settings)
+        mm_val = _read_mm_setting(mapping[:key])
+        unless mm_val.nil?
+          result = _coerce(mm_val, mapping[:type])
+          return result unless result.nil?
         end
+
+        # 2. Try legacy ModSettingsMenu
+        if defined?(ModSettingsMenu) && ModSettingsMenu.respond_to?(:get)
+          val = ModSettingsMenu.get(mapping[:key].to_sym)
+          unless val.nil?
+            result = _coerce(val, mapping[:type])
+            return result unless result.nil?
+          end
+        end
+      rescue => e
+        echoln "[VOE] Error accessing setting #{name}: #{e.message}" if defined?(echoln)
       end
-    rescue => e
-      # If there's an error accessing mod settings, fall through to defaults
-      echoln "[VOE] Error accessing setting #{name}: #{e.message}" if defined?(echoln)
     end
-    # Fallback/Default values if ModSettings not ready or key not found
-    case name
-      when :DISABLE_SETTINGS then false
-      when :LOG_SPAWNS then false
-      when :SHINY_RATE then 8192
-      when :MAX_DISTANCE then 8
-      when :DELETE_EVENTS then true
-      when :DELETE_SHINY then false
-      when :BRIGHT_SHINY then true
-      when :COLORFUL_TEXT then true
-      when :WATER_SPAWNS_ONLY_SURFING then true
-      when :DIFFERENT_ENCOUNTERS then false
-      when :ENCOUNTER_TABLE then 1
-      when :SPAWN_ANIMATION then 2
-      when :SHINY_ANIMATION then 2  # Use same as spawn, or set to 0 to disable
-      when :MAX_ENCOUNTERS then 5
-      when :FUSION_ENCOUNTERS then true
-      when :FUSION_RATE then 10
-      when :HORDE_BATTLES then true
-      when :HORDE_DISTANCE then 2
-      when :SPAWN_ON_LOAD then false
-      when :INITIAL_SPAWN_COUNT then 6
-      # Outbreak defaults
-      when :OUTBREAK_ENABLED then true
-      when :OUTBREAK_DURATION then 10
-      when :OUTBREAK_TYPE then 0
-      when :OUTBREAK_SHINY_MULT then 1
-      when :OUTBREAK_NO_SHINY_DESPAWN then true
-      when :OUTBREAK_SPAWN_COUNT then 6
-      when :OUTBREAK_MAX_OVERRIDE then 12
-      when :OUTBREAK_SPAWN_RATE then 200
-      when :OUTBREAK_RADIUS then 15
-      when :SHINY_PANIC_ENABLED then true
-      else super
-    end
+
+    # 3. Fallback to defaults
+    return DEFAULTS[name] if DEFAULTS.key?(name)
+    super
   end
 
   # The amount of encounters currently on the map
