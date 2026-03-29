@@ -1,0 +1,21 @@
+{
+  "name": "Pokemon Survivors",
+  "id": "pokemon_survivors",
+  "version": "1.0.0",
+  "author": "jov4n",
+  "description": [
+    "A Vampire Survivors-style minigame featuring Pokemon.",
+    "Survive waves of wild Pokemon using auto-attacking weapons,",
+    "collect XP gems, level up, and choose new abilities.",
+    "",
+    "Launch from debug console or event: pbPokemonSurvivors"
+  ],
+  "tags": ["Gameplay", "Content"],
+  "dependencies": [],
+  "incompatible": [],
+  "settings": [],
+  "scripts": [
+    "001_PokemonSurvivors.rb"
+  ],
+  "icon": "icon.png"
+}
