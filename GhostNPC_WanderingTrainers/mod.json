@@ -11,7 +11,7 @@
     "- Low spawn rates so wandering trainers don't overwhelm the world.",
     "- Fair battle encounters that strictly forbid over-powered Legendaries."
   ],
-  "tags": ["QoL"],
+  "tags": ["Gameplay", "Content"],
   "dependencies": [],
   "incompatible": [],
   "settings": [],
