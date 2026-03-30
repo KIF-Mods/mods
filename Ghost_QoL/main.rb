@@ -179,8 +179,6 @@ module GhostQoL
             # Sub-mod: PocketWatch
             self.register_feature(:qol_pocketwatch_v1, "PocketWatch", "Permanent clock in the top-left corner.", 0)
 
-            # Sub-mod: Substitute HP Display
-            self.register_feature(:qol_substitute_hp_v1, "Substitute HP", "Display HP of an active Substitute.", 0)
 
             # Sub-mod: PC-Plus
             self.register_feature(:qol_pc_plus_v1, "PC-Plus", "Adds Box Visual Renaming and Bulk Action features.", 0)
