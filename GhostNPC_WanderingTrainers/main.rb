@@ -1,9 +1,10 @@
 #===============================================================================
-# Wandering Trainers Mod 7.5 (Spawn Path Validation) - Ghost's Custom Spawn Rates
+# Wandering Trainers Mod 7.6 (Spawn Path Validation)
 #===============================================================================
 
 class Game_Character
   attr_accessor :step_anime unless method_defined?(:step_anime=)
+  attr_accessor :move_type unless method_defined?(:move_type)
   attr_accessor :ghostnpc_shiny
   def ghostnpc_move_toward(target)
     return if !target
