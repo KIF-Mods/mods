@@ -237,6 +237,13 @@ end
               if @id == 9000
                 offset = GhostbuddyPokePets.smooth_offset_x rescue 0
                 base += offset if offset && offset != 0
+                
+                if GhostbuddyPokePets.respond_to?(:is_large_sprite?) && GhostbuddyPokePets.is_large_sprite?(@character_name)
+                  case @direction
+                  when 4 then base += 32
+                  when 6 then base -= 32
+                  end
+                end
               end
               return base
             end
@@ -247,6 +254,13 @@ end
               if @id == 9000
                 offset = GhostbuddyPokePets.smooth_offset_y rescue 0
                 base += offset if offset && offset != 0
+                
+                if GhostbuddyPokePets.respond_to?(:is_large_sprite?) && GhostbuddyPokePets.is_large_sprite?(@character_name)
+                  case @direction
+                  when 8 then base += 32
+                  when 2 then base -= 32
+                  end
+                end
               end
               return base
             end
@@ -463,14 +477,23 @@ module GhostbuddyPokePets
                   return res ? res[0] : 0
                 end
 
-                def self.get_behind_position(leader)
+                def self.is_large_sprite?(char_name)
+                  return false if char_name.nil? || char_name == ""
+                  bmp = RPG::Cache.character(char_name, 0) rescue nil
+                  return false if !bmp || bmp.disposed?
+                  frame_w = bmp.width / 4
+                  return frame_w >= 96
+                end
+
+                def self.get_behind_position(leader, char_name = "")
                   d = leader.direction
                   dx = 0; dy = 0
+                  gap = 1
                   case d
-                  when 2 then dy = -1
-                  when 8 then dy = 1
-                  when 4 then dx = 1
-                  when 6 then dx = -1
+                  when 2 then dy = -gap
+                  when 8 then dy = gap
+                  when 4 then dx = gap
+                  when 6 then dx = -gap
                   end
                   return leader.x + dx, leader.y + dy, d
                 end
@@ -524,8 +547,20 @@ module GhostbuddyPokePets
                   display_id = pkmn.isFusion? ? (pkmn.species_data.body_pokemon.id_number rescue 0) : (pkmn.species_data.id_number rescue 0)
                   id_str = display_id.to_s
                   id_3 = sprintf("%03d", display_id.to_i) rescue id_str.to_s
+                  
+                  species_obj = pkmn.isFusion? ? (pkmn.species_data.body_pokemon rescue nil) : pkmn.species_data
+                  species_str = species_obj.id.to_s.upcase rescue ""
+
                   possible_names = []
                   folders = ["Followers/", "Overworld/", ""]
+
+                  if species_str && species_str != ""
+                    if pkmn.shiny?
+                      possible_names << species_str + "s" << species_str + "s_0" << species_str + "_s"
+                    end
+                    possible_names << species_str << species_str + "_0"
+                  end
+
                   if pkmn.shiny?
                     possible_names << id_str.to_s + "s" << id_3 + "s" << id_str.to_s + "s_0" << id_3 + "s_0"
                   end
@@ -578,7 +613,7 @@ module GhostbuddyPokePets
                   end
 
                   map_id = $game_map ? $game_map.map_id : 0
-                  spawn_x, spawn_y, pet_dir = self.get_behind_position($game_player)
+                  spawn_x, spawn_y, pet_dir = self.get_behind_position($game_player, char_name)
                   event_data = [map_id, 9000, map_id, spawn_x, spawn_y, pet_dir, char_name, 0, "GB_PET", nil]
 
                   $PokemonGlobal.dependentEvents << event_data
@@ -729,9 +764,10 @@ module GhostbuddyPokePets
 
                 def self.open_estimation_menu(event, pkmn)
                   return if !event || !pkmn
-                  temp_icon = PokemonIconSprite.new(pkmn) rescue nil
-                  target_res = self.get_prominent_hue(temp_icon.bitmap) if temp_icon
-                  temp_icon.dispose if temp_icon
+                  temp_icon = PokemonSprite.new
+                  temp_icon.setPokemonBitmap(pkmn)
+                  target_res = self.get_prominent_hue(temp_icon.bitmap) if temp_icon.bitmap
+                  temp_icon.dispose
                   return pbMessage(_INTL("Could not estimate color for this Pokémon.")) if !target_res
 
                   target_hue, target_bri = target_res
@@ -752,8 +788,9 @@ module GhostbuddyPokePets
                   cmd_window.x = Graphics.width - cmd_window.width
                   cmd_window.y = 0; cmd_window.z = 99999
 
-                  icon = PokemonIconSprite.new(pkmn)
-                  icon.x = 40; icon.y = 40; icon.z = 99999
+                  icon = PokemonSprite.new
+                  icon.setPokemonBitmap(pkmn)
+                  icon.x = 120; icon.y = 150; icon.z = 99999
 
                   apply = proc {
                     event.ghostbuddy_hue = cur_hue
@@ -807,8 +844,9 @@ module GhostbuddyPokePets
                   cmd_window.x = Graphics.width - cmd_window.width
                   cmd_window.y = 0; cmd_window.z = 99999
 
-                  icon = PokemonIconSprite.new(pkmn)
-                  icon.x = 40; icon.y = 40; icon.z = 99999
+                  icon = PokemonSprite.new
+                  icon.setPokemonBitmap(pkmn)
+                  icon.x = 120; icon.y = 150; icon.z = 99999
 
                   loop do
                     Graphics.update; Input.update; cmd_window.update; icon.update
