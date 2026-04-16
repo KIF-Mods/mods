@@ -1864,13 +1864,19 @@ class BagWindowEBDX
   alias mouse_ui_original_useItem_qmark useItem?
   def useItem?
     Input.update
+    item_data = (@ret) ? GameData::Item.try_get(@ret) : nil
+    if !item_data
+      @ret = nil
+      self.refresh if respond_to?(:refresh)
+      return false
+    end
     bitmap = @sprites["confirm"].bitmap
     bitmap.clear
     bmp = pbBitmap(@path + @confirmImg)
     bitmap.blt(0, 0, bmp, bmp.rect)
-    icon = pbBitmap(GameData::Item.icon_filename(@ret))
+    icon = pbBitmap(GameData::Item.icon_filename(item_data.id))
     bitmap.blt(20, 30, icon, icon.rect)
-    drawTextEx(bitmap, 80, 12, 364, 3, GameData::Item.get(@ret).description, @baseColor, Color.new(0, 0, 0, 32))
+    drawTextEx(bitmap, 80, 12, 364, 3, item_data.description, @baseColor, Color.new(0, 0, 0, 32))
     @sprites["sel"].target(@sprites["confirm"])
     8.times do
       @sprites["confirm"].x += @viewport.width / 8
@@ -2511,6 +2517,64 @@ class PokemonStorageScene
         elsif selection == Settings::MAX_PARTY_SIZE
           @selection = selection
           return (depositing) ? -3 : -1
+        end
+      end
+    end
+  end
+end
+
+class DoublePreviewScreen
+  def pbMouseUIPreviewSelectionAt(mx, my)
+    return 0 if pbMouseUIPreviewWindowHit?(@picture1, mx, my)
+    return 1 if pbMouseUIPreviewWindowHit?(@picture2, mx, my)
+    return -1 if @sprites && @sprites["cancel"] && MouseUI.sprite_hit?(@sprites["cancel"], mx, my)
+    return nil
+  end
+
+  def pbMouseUIPreviewWindowHit?(window, mx, my)
+    return false if !window || window.disposed?
+    return false if window.respond_to?(:visible) && !window.visible
+    sx, sy = MouseUI.window_screen_position(window)
+    return mx >= sx && mx < sx + window.width && my >= sy && my < sy + window.height
+  rescue
+    return false
+  end
+
+  def startSelection
+    loop do
+      Graphics.update
+      Input.update
+
+      pos = MouseUI.pointer_position
+      if pos && MouseUI.mouse_hover_active?
+        hover_selection = pbMouseUIPreviewSelectionAt(pos[0], pos[1])
+        if !hover_selection.nil? && hover_selection != @selected
+          @selected = hover_selection
+          updateSelectionGraphics
+          pbPlayCursorSE
+        end
+      end
+
+      left_click = defined?(Input::MOUSELEFT) && Input.trigger?(Input::MOUSELEFT)
+      right_click = defined?(Input::MOUSERIGHT) && Input.trigger?(Input::MOUSERIGHT)
+      if left_click
+        if pos
+          click_selection = pbMouseUIPreviewSelectionAt(pos[0], pos[1])
+          if !click_selection.nil?
+            @selected = click_selection
+            updateSelectionGraphics
+            pbPlayDecisionSE
+            return @selected
+          end
+        end
+      elsif right_click || Input.trigger?(Input::BACK)
+        pbPlayCancelSE
+        return -1
+      else
+        updateSelection
+        if Input.trigger?(Input::USE)
+          pbPlayDecisionSE
+          return @selected
         end
       end
     end
