@@ -1,13 +1,23 @@
 # 002_BallSeals_Editor.rb
 class BallSealsCapsuleSelectScene
   def choose_slot(prompt = nil)
-    commands = BallSealsKIF.capsules.each_with_index.map do |cap, i|
-      count = (cap[:placements] || []).length
-      "%02d. %s (%d/%d)" % [i + 1, cap[:name], count, BallSealsKIF::MAX_SEALS_PER_CAPSULE]
+    loop do
+      pairs = BallSealsKIF.sorted_capsule_pairs
+      sort_label = BallSealsKIF.capsule_sort_mode_label
+      commands = [sort_label]
+      commands.concat(pairs.map do |slot, cap|
+        count = (cap[:placements] || []).length
+        "%02d. %s (%d/%d)" % [slot, cap[:name], count, BallSealsKIF::MAX_SEALS_PER_CAPSULE]
+      end)
+      idx = BallSealsCommandScene.new(prompt || BallSealsKIF.intl("Choose Capsule"), commands, BallSealsKIF.intl("Pick a slot. First option toggles sort.")).main
+      return nil if idx.nil?
+      if idx == 0
+        # Toggle sort mode
+        BallSealsKIF.toggle_capsule_sort_mode
+        next
+      end
+      return pairs[idx - 1][0]  # Return the actual slot number
     end
-    idx = BallSealsCommandScene.new(prompt || BallSealsKIF.intl("Choose Capsule"), commands, BallSealsKIF.intl("Pick a slot.")).main
-    return nil if idx.nil?
-    idx + 1
   end
 end
 
@@ -899,6 +909,7 @@ class BallSealsCapsuleEditorScene
     return if !pkmn
     pkmn.ball_capsule_slot = @slot
     pkmn.ball_seal_placements = nil if pkmn.respond_to?(:ball_seal_placements=)
+    BallSealsKIF.cache_capsule_for_pokemon(pkmn, @slot)
     pbMessage(BallSealsKIF.intl("Assigned {1} to {2}.", @capsule[:name], pkmn.name))
   end
 
