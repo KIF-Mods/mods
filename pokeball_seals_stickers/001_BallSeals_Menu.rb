@@ -45,6 +45,8 @@ end
 
 class BallSealsHubScene
   def main
+    # Ensure storage hooks are installed (lazy retry for late-loading classes)
+    BallSealsKIF.ensure_storage_hooks
     loop do
       cmd = BallSealsCommandScene.new(
         BallSealsKIF.intl("Ball Capsules"),
@@ -70,13 +72,16 @@ class BallSealsHubScene
         next if slot.nil?
         pkmn.ball_capsule_slot = slot
         pkmn.ball_seal_placements = nil if pkmn.respond_to?(:ball_seal_placements=)
+        BallSealsKIF.cache_capsule_for_pokemon(pkmn, slot)
         pbMessage(BallSealsKIF.intl("Assigned Capsule {1} to {2}.", slot, pkmn.name))
       when 2
         pkmn = BallSealsKIF.choose_party_pokemon(BallSealsKIF.intl("Remove capsule from which Pokémon?"))
         next if !pkmn
+        BallSealsKIF.clear_capsule_cache(pkmn)
         pkmn.ball_capsule_slot = nil if pkmn.respond_to?(:ball_capsule_slot=)
         pkmn.ball_seals = [] if pkmn.respond_to?(:ball_seals=)
         pkmn.ball_seal_placements = nil if pkmn.respond_to?(:ball_seal_placements=)
+        pkmn.ball_capsule_data = nil if pkmn.respond_to?(:ball_capsule_data=)
         pbMessage(BallSealsKIF.intl("Removed Ball Capsule assignment."))
       when 3
         pkmn = BallSealsKIF.choose_party_pokemon(BallSealsKIF.intl("Preview which Pokémon's capsule?"))
@@ -98,6 +103,16 @@ module BallSealsKIF
       BallSealsHubScene.new.main
     rescue => e
       log("open_hub_from_menu ERROR: #{e.class}: #{e.message}\n#{(e.backtrace || [])[0,5].join("\n")}")
+      pbMessage(intl("Ball Seals error: {1}", e.message.to_s[0, 60])) if defined?(pbMessage)
+    end
+  end
+
+  # Opens the Ball Seals hub directly (for Overworld Menu integration).
+  def self.open_capsule_select
+    begin
+      BallSealsHubScene.new.main
+    rescue => e
+      log("open_capsule_select ERROR: #{e.class}: #{e.message}\n#{(e.backtrace || [])[0,5].join("\n")}")
       pbMessage(intl("Ball Seals error: {1}", e.message.to_s[0, 60])) if defined?(pbMessage)
     end
   end
@@ -363,6 +378,7 @@ module BallSealsKIF
 
   def self.init_menu
     ok = install_pause_menu_hook
+    install_overworld_menu_entry if defined?(OverworldMenu)
     log("init_menu complete: #{ok ? 'OK' : 'FAILED'}")
   end
 end
