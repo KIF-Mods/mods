@@ -354,6 +354,19 @@ end
 class CounterfeitShinyEditorScene
   STYLE_NAMES = CounterfeitShinies::Config::SHINY_STYLE_NAMES
   MAX_PREVIEW_ZOOM = 4.0
+  HUE_INDEX = 0
+  RED_INDEX = 1
+  GREEN_INDEX = 2
+  BLUE_INDEX = 3
+  RED_BOOST_INDEX = 4
+  GREEN_BOOST_INDEX = 5
+  BLUE_BOOST_INDEX = 6
+  SHUFFLE_INDEX = 7
+  STYLE_INDEX = 8
+  LOAD_FAVORITE_INDEX = 9
+  SAVE_FAVORITE_INDEX = 10
+  COMMIT_INDEX = 11
+  CANCEL_INDEX = 12
 
   def initialize(pokemon)
     @pokemon = pokemon
@@ -528,20 +541,20 @@ class CounterfeitShinyEditorScene
     triggered = left ? Input.repeat?(Input::LEFT) : Input.repeat?(Input::RIGHT)
     return false if !triggered
     case @sprites["sliders"].index
-    when 0
+    when HUE_INDEX
       @pokemon.shinyValue = CounterfeitShinies.sanitize_hue(@pokemon.shinyValue? + (direction * 6))
-    when 1
+    when RED_INDEX
       @pokemon.shinyR = CounterfeitShinies.sanitize_channel(@pokemon.shinyR? + direction)
-    when 2
+    when GREEN_INDEX
       @pokemon.shinyG = CounterfeitShinies.sanitize_channel(@pokemon.shinyG? + direction)
-    when 3
+    when BLUE_INDEX
       @pokemon.shinyB = CounterfeitShinies.sanitize_channel(@pokemon.shinyB? + direction)
-    when 4, 5, 6
+    when RED_BOOST_INDEX, GREEN_BOOST_INDEX, BLUE_BOOST_INDEX
       krs = CounterfeitShinies.sanitize_krs(@pokemon.shinyKRS?)
-      slot = @sprites["sliders"].index - 4
+      slot = @sprites["sliders"].index - RED_BOOST_INDEX
       krs[slot] = CounterfeitShinies.sanitize_boost(krs[slot].to_i + (direction * 8))
       @pokemon.shinyKRS = krs
-    when 7
+    when STYLE_INDEX
       @pokemon.shinyimprovpif = CounterfeitShinies.sanitize_style(@pokemon.shinyimprovpif? + direction)
     else
       return false
@@ -552,19 +565,19 @@ class CounterfeitShinyEditorScene
 
   def handle_action
     case @sprites["sliders"].index
-    when 7
+    when SHUFFLE_INDEX
       CounterfeitShinies.apply_palette!(@pokemon, CounterfeitShinies.default_palette)
       refresh_scene
       return :continue
-    when 8
+    when LOAD_FAVORITE_INDEX
       load_favorite_palette
       refresh_scene
       return :continue
-    when 9
+    when SAVE_FAVORITE_INDEX
       save_favorite_palette
       refresh_scene
       return :continue
-    when 10
+    when COMMIT_INDEX
       CounterfeitShinies.apply_counterfeit!(@pokemon, {
         :shinyValue     => @pokemon.shinyValue?,
         :shinyR         => @pokemon.shinyR?,
@@ -574,7 +587,7 @@ class CounterfeitShinyEditorScene
         :shinyimprovpif => @pokemon.shinyimprovpif?
       }, :workshop)
       return @new_counterfeit ? :created : :updated
-    when 11
+    when CANCEL_INDEX
       restore_original_state
       return nil
     else
