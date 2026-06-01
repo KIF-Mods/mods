@@ -1,3 +1,0 @@
-C:/Users/rolan/Downloads/mods/pokedex_voice_over/fish_speech/checkpoints/fish-speech-1.5/firefly-gan-vq-fsq-8x1024-21hz-generator.pth filter=lfs diff=lfs merge=lfs -text
-C:/Users/rolan/Downloads/mods/pokedex_voice_over/fish_speech/checkpoints/fish-speech-1.5/model.pth filter=lfs diff=lfs merge=lfs -text
-*.pth filter=lfs diff=lfs merge=lfs -text
