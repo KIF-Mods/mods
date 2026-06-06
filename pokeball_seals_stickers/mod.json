@@ -3,7 +3,7 @@
   "id": "pokeball_seals_stickers",
   "version": "1.1.0",
   "author": "SilvertongueRED",
-  "description": "Attach animated seals (stickers) to your pokeballs to show off your pokemon in style during battle and even taunt other players! Just like in the official games! See the in game menu under options for editing your capsules with these icons! Also accessible from the Overworld Menu mod if installed. Capsules can be stored with their pokemon and retrieved for re-editing when same pokemon withdrawn!",
+  "description": "Attach animated seals (stickers) to your pokeballs to show off your pokemon in style during battle and even taunt other players! Just like in the official games! See the in game menu under options for editing your capsules with these icons! Also accessible from the Overworld Menu mod if installed.",
   "tags": ["Visual", "Cosmetic", "UI", "Content"],
   "dependencies": [],
   "incompatible": [],
