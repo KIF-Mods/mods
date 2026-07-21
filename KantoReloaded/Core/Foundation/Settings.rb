@@ -1,13 +1,15 @@
 #==============================================================================
 # Kanto Reloaded Settings Registry
 #==============================================================================
-# Runtime setting definitions with values persisted in the KR save bucket.
+# Runtime setting definitions with per-save and global value storage.
 # UI rendering and legacy Mod Settings Menu compatibility are separate layers.
 #==============================================================================
 
 module KantoReloaded
   module Settings
     TYPES = [:toggle, :enum, :number, :slider, :text, :button, :custom].freeze
+    SCOPES = [:save, :global].freeze
+    DEFAULT_SCOPE = :save
     DEFAULT_CATEGORY = :general
     STORAGE_SYSTEM = :settings
 
@@ -51,6 +53,7 @@ module KantoReloaded
         definition = build_definition(normalized_key, owner, data)
         ensure_category(definition[:category], owner)
         @definitions[normalized_key] = definition
+        migrate_global_definition(definition)
         emit(:kanto_reloaded_setting_registered, :key => normalized_key, :definition => copy_definition(definition))
         copy_definition(definition)
       rescue StandardError => e
@@ -167,7 +170,7 @@ module KantoReloaded
       def set(key, value, options = {})
         normalized_key = normalize_key(key)
         return nil unless normalized_key
-        return nil if save_writes_blocked?
+        return nil if save_writes_blocked?(normalized_key)
         data = symbolize_keys(options)
         definition = @definitions[normalized_key]
         normalized_value = definition ? normalize_value(definition, value) : value
@@ -175,7 +178,7 @@ module KantoReloaded
 
         old_value = get(normalized_key, nil)
         changed = old_value != normalized_value || !stored?(normalized_key)
-        values_storage[normalized_key.to_s] = deep_copy(normalized_value)
+        return nil unless write_stored_value(normalized_key, normalized_value)
         notify_change(normalized_key, normalized_value, old_value) if changed && data.fetch(:notify, true)
         deep_copy(normalized_value)
       rescue StandardError => e
@@ -190,18 +193,18 @@ module KantoReloaded
       def stored?(key)
         normalized_key = normalize_key(key)
         return false unless normalized_key
-        values_storage.has_key?(normalized_key.to_s) || values_storage.has_key?(normalized_key)
+        values = values_storage_for(normalized_key)
+        values.has_key?(normalized_key.to_s) || values.has_key?(normalized_key)
       end
 
       def reset(key, options = {})
         normalized_key = normalize_key(key)
         return false unless normalized_key
-        return false if save_writes_blocked?
+        return false if save_writes_blocked?(normalized_key)
         data = symbolize_keys(options)
         return false unless stored?(normalized_key)
         old_value = get(normalized_key, nil)
-        values_storage.delete(normalized_key.to_s)
-        values_storage.delete(normalized_key)
+        return false unless delete_stored_value(normalized_key)
         new_value = get(normalized_key, nil)
         notify_change(normalized_key, new_value, old_value) if data.fetch(:notify, true)
         true
@@ -216,7 +219,7 @@ module KantoReloaded
         registered_keys = @definitions.values.select do |definition|
           definition[:owner] == owner
         end.map { |definition| definition[:key] }
-        namespaced_keys = values_storage.keys.select do |key|
+        namespaced_keys = all_stored_keys.select do |key|
           key.to_s.start_with?(prefix)
         end
         (registered_keys + namespaced_keys).uniq.count do |key|
@@ -274,7 +277,8 @@ module KantoReloaded
         if include_defaults
           @definitions.each_key { |key| result[key.to_s] = get(key, nil) }
         end
-        values_storage.each { |key, value| result[key.to_s] = deep_copy(value) }
+        save_values_storage.each { |key, value| result[key.to_s] = deep_copy(value) }
+        global_values_storage.each { |key, value| result[key.to_s] = deep_copy(value) }
         result
       end
 
@@ -327,6 +331,7 @@ module KantoReloaded
           :description => data[:description].to_s,
           :type => type,
           :category => normalize_category(data[:category]) || DEFAULT_CATEGORY,
+          :scope => normalize_scope(data[:scope]),
           :owner => owner,
           :module => data[:module] ? normalize_owner(data[:module]) : nil,
           :priority => integer_value(data[:priority], 100),
@@ -471,14 +476,17 @@ module KantoReloaded
       def register_save_events
         return unless defined?(KantoReloaded::Events)
         KantoReloaded::Events.on(:kanto_reloaded_save_loaded, :settings_apply_loaded, priority: 200) do |_context|
-          KantoReloaded::Settings.apply_callbacks(:save_loaded) if defined?(KantoReloaded::Settings)
+          if defined?(KantoReloaded::Settings)
+            KantoReloaded::Settings.__send__(:migrate_global_values)
+            KantoReloaded::Settings.apply_callbacks(:save_loaded)
+          end
         end
         KantoReloaded::Events.on(:kanto_reloaded_save_new_game, :settings_apply_new_game, priority: 200) do |_context|
           KantoReloaded::Settings.apply_callbacks(:new_game) if defined?(KantoReloaded::Settings)
         end
       end
 
-      def values_storage
+      def save_values_storage
         return @fallback_values ||= {} unless defined?(KantoReloaded::SaveData)
         root = KantoReloaded::SaveData.system(STORAGE_SYSTEM)
         values = root["values"] || root[:values]
@@ -489,14 +497,92 @@ module KantoReloaded
         values
       end
 
+      def global_values_storage
+        return @fallback_global_values ||= {} unless defined?(KantoReloaded::GlobalSettings)
+        KantoReloaded::GlobalSettings.values
+      end
+
+      def values_storage_for(key)
+        setting_scope(key) == :global ? global_values_storage : save_values_storage
+      end
+
       def stored_value(key)
-        values = values_storage
+        values = values_storage_for(key)
         return [true, values[key.to_s]] if values.has_key?(key.to_s)
         return [true, values[key]] if values.has_key?(key)
         [false, nil]
       end
 
-      def save_writes_blocked?
+      def write_stored_value(key, value)
+        if setting_scope(key) == :global
+          if defined?(KantoReloaded::GlobalSettings)
+            return KantoReloaded::GlobalSettings.set(key, deep_copy(value))
+          end
+          global_values_storage[key.to_s] = deep_copy(value)
+        else
+          save_values_storage[key.to_s] = deep_copy(value)
+        end
+        true
+      end
+
+      def delete_stored_value(key)
+        if setting_scope(key) == :global
+          if defined?(KantoReloaded::GlobalSettings)
+            return KantoReloaded::GlobalSettings.delete(key)
+          end
+          values = global_values_storage
+        else
+          values = save_values_storage
+        end
+        values.delete(key.to_s)
+        values.delete(key)
+        true
+      end
+
+      def all_stored_keys
+        (save_values_storage.keys + global_values_storage.keys).uniq
+      end
+
+      def setting_scope(key)
+        definition = @definitions[key]
+        definition ? definition[:scope] : DEFAULT_SCOPE
+      end
+
+      def migrate_global_definition(definition)
+        return false unless definition[:scope] == :global
+        return false unless defined?(KantoReloaded::GlobalSettings)
+        key = definition[:key]
+        return false if KantoReloaded::GlobalSettings.stored?(key)
+        found, value = value_from_storage(save_values_storage, key)
+        return false unless found
+        KantoReloaded::GlobalSettings.set(key, deep_copy(value))
+      end
+
+      def migrate_global_values
+        return 0 unless defined?(KantoReloaded::GlobalSettings)
+        pending = {}
+        @definitions.each_value do |definition|
+          next unless definition[:scope] == :global
+          key = definition[:key]
+          next if KantoReloaded::GlobalSettings.stored?(key)
+          found, value = value_from_storage(save_values_storage, key)
+          pending[key.to_s] = deep_copy(value) if found
+        end
+        migrated = KantoReloaded::GlobalSettings.merge_missing(pending)
+        if migrated > 0 && defined?(KantoReloaded::Log)
+          KantoReloaded::Log.info("Migrated #{migrated} Interface setting(s) to global storage", :settings)
+        end
+        migrated
+      end
+
+      def value_from_storage(values, key)
+        return [true, values[key.to_s]] if values.has_key?(key.to_s)
+        return [true, values[key]] if values.has_key?(key)
+        [false, nil]
+      end
+
+      def save_writes_blocked?(key = nil)
+        return false if key && setting_scope(key) == :global
         defined?(KantoReloaded::SaveData) && KantoReloaded::SaveData.write_blocked?
       rescue
         false
@@ -510,6 +596,11 @@ module KantoReloaded
       def normalize_type(value)
         type = value.to_s.strip.downcase.to_sym
         TYPES.include?(type) ? type : :custom
+      end
+
+      def normalize_scope(value)
+        scope = value.to_s.strip.downcase.to_sym
+        SCOPES.include?(scope) ? scope : DEFAULT_SCOPE
       end
 
       def normalize_value_style(value, default)

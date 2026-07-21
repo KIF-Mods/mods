@@ -26,6 +26,7 @@ module KantoReloaded
       :settings_ui     => { :classification => :stable, :constant => "KantoReloaded::SettingsUI" },
       :overworld_menu  => { :classification => :stable, :constant => "KantoReloaded::OverworldMenu" },
       :battle_menu     => { :classification => :stable, :constant => "KantoReloaded::BattleMenu" },
+      :save_manager    => { :classification => :stable, :constant => "KantoReloaded::SaveManager" },
       :tm_vault        => { :classification => :stable, :constant => "KantoReloaded::TMVault" },
       :reloaded_shop   => { :classification => :stable, :constant => "KantoReloaded::ReloadedShop" },
       :level_locking   => { :classification => :stable, :constant => "KantoReloaded::LevelLocking" },

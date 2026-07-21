@@ -48,7 +48,10 @@ module scenes. Existing KIF scenes keep their original row order.
 The main KR settings scene presents registered categories as collapsed headers.
 Confirm or a mouse click expands a header in place. Direct category and module
 scene APIs remain available for mods that need to open a focused settings page.
-The root scene currently contains Interface, Quality of Life, and About only.
+The root scene contains Interface, Gameplay, Quality of Life, Economy,
+Developer / Utility, and About. Developer / Utility appears directly above
+About and contains developer, maintenance, and file-management actions such as
+Save Manager.
 Legacy MSM-owned categories remain in the separate Mod Settings scene.
 
 The Interface category includes `Global Small Text`. It defaults to On and

@@ -1025,6 +1025,7 @@ module KantoReloaded
           :description => "Press Action during the main battle command to open the Battle Menu.",
           :type => :toggle,
           :category => :interface,
+          :scope => :global,
           :owner => :kanto_reloaded,
           :value_style => :integer,
           :default => 1,
@@ -1072,6 +1073,11 @@ module KantoReloaded
 
       def correct_imported_legacy_default
         return if KantoReloaded::SaveData.get(:battle_menu, DEFAULT_ON_CORRECTION, false, section: :systems)
+        if defined?(KantoReloaded::GlobalSettings) &&
+           KantoReloaded::GlobalSettings.stored?(ENABLED_SETTING)
+          KantoReloaded::SaveData.set(:battle_menu, DEFAULT_ON_CORRECTION, true, section: :systems)
+          return true
+        end
         value = legacy_setting_value
         if KantoReloaded::Settings.stored?(ENABLED_SETTING) &&
            !enabled_value?(KantoReloaded::Settings.get(ENABLED_SETTING, 1)) &&

@@ -40,6 +40,7 @@ module KantoReloaded
           :description => "Enables the quick-access Overworld Menu while walking around.",
           :type => :toggle,
           :category => :interface,
+          :scope => :global,
           :owner => :kanto_reloaded,
           :value_style => :integer,
           :default => 1,

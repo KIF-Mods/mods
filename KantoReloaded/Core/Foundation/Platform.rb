@@ -20,11 +20,13 @@ module KantoReloaded
     CAPABILITIES = {
       :windows => [
         :gameplay, :mod_manager, :manual_mods, :settings, :save_data,
-        :data_patches, :filesystem, :json, :mouse, :clipboard, :open_url
+        :data_patches, :filesystem, :json, :mouse, :clipboard, :open_url,
+        :open_folder
       ],
       :proton => [
         :gameplay, :mod_manager, :manual_mods, :settings, :save_data,
-        :data_patches, :filesystem, :json, :mouse, :clipboard, :open_url
+        :data_patches, :filesystem, :json, :mouse, :clipboard, :open_url,
+        :open_folder
       ],
       :joiplay => [
         :gameplay, :mod_manager, :manual_mods, :settings, :save_data,
@@ -117,6 +119,22 @@ module KantoReloaded
         true
       rescue StandardError => e
         log_adapter_failure(:open_url, e)
+        false
+      end
+
+      def open_folder(path)
+        return false unless supports?(:open_folder)
+        folder = File.expand_path(path.to_s)
+        return false unless directory?(folder)
+        opened = if proton? && !windows_environment?
+                   system("xdg-open", folder)
+                 else
+                   system("explorer.exe", folder.tr("/", "\\"))
+                 end
+        raise "The operating system could not open the folder." unless opened
+        true
+      rescue StandardError => e
+        log_adapter_failure(:open_folder, e)
         false
       end
 

@@ -7,6 +7,7 @@ module KantoReloaded
     FILES = [
       "Core/Foundation/Logging.rb",
       "Core/Foundation/Platform.rb",
+      "Core/Foundation/GlobalSettings.rb",
       "Core/Foundation/Hooks.rb",
       "Core/Foundation/APIContracts.rb",
       "Core/Foundation/Events.rb",
@@ -37,6 +38,9 @@ module KantoReloaded
       "Core/DataPatches/TrainerTypes.rb",
       "Modules/OverworldMenu.rb",
       "Modules/BattleMenu.rb",
+      "Modules/SaveManager/SaveArchive.rb",
+      "Modules/SaveManager/SaveManagerUI.rb",
+      "Modules/SaveManager/SaveManager.rb",
       "Modules/HealingOverworld.rb",
       "Modules/TMVault/TMVault.rb",
       "Modules/TMVault/TMVaultUI.rb",

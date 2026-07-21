@@ -2,8 +2,9 @@
 
 `KantoReloaded::Settings` is the persistent registry behind the future KR
 settings menu. It does not render a menu and does not depend on Mod Settings
-Menu. Setting definitions and callbacks remain runtime-only; values are stored
-inside `SaveData.system(:settings)`.
+Menu. Setting definitions and callbacks remain runtime-only. Values use
+per-save storage by default, while definitions marked `:scope => :global` are
+written immediately to KR's global settings file and apply across all saves.
 
 ## Register a Setting
 
@@ -14,6 +15,7 @@ KantoReloaded::Settings.register(:battle_style, {
   :type => :enum,
   :values => ["Standard", "Fast"],
   :default => 0,
+  :scope => :save,
   :category => :gameplay,
   :owner => :example_mod
 })
@@ -21,6 +23,16 @@ KantoReloaded::Settings.register(:battle_style, {
 
 Supported types are `:toggle`, `:enum`, `:number`, `:slider`, `:text`,
 `:button`, and `:custom`.
+
+Supported scopes are `:save` and `:global`. The default is `:save`, which
+stores values inside `SaveData.system(:settings)`. Global values are stored
+outside individual save slots and persist as soon as they change. Existing
+per-save values are copied to global storage the first time a global setting is
+loaded, but never overwrite a global value that already exists.
+
+All current Interface value options use global scope. Battle Menu page layout
+and Favorite command customization remain per-save module data and are not
+part of the settings registry.
 
 Buttons normally appear before value rows. A button that belongs directly
 after a particular setting can declare

@@ -322,6 +322,12 @@ module KantoReloaded
           :priority => 35,
           :owner => :kanto_reloaded
         })
+        KantoReloaded::Settings.register_category(:utility, {
+          :name => "Developer / Utility",
+          :description => "Kanto Reloaded developer, maintenance, and file-management tools.",
+          :priority => 40,
+          :owner => :kanto_reloaded
+        })
         KantoReloaded::Settings.register(OPTION_THEME_KEY, theme_definition(
           "Option Color", theme_names, DEFAULT_OPTION_THEME, 10,
           "Color used for option labels and values."
@@ -339,6 +345,7 @@ module KantoReloaded
           :description => "Uses the small system font globally.",
           :type => :toggle,
           :category => :interface,
+          :scope => :global,
           :owner => :kanto_reloaded,
           :value_style => :integer,
           :default => DEFAULT_SMALL_TEXT,
@@ -351,6 +358,7 @@ module KantoReloaded
             :description => "Window border used for menus and option screens.",
             :type => :enum,
             :category => :interface,
+            :scope => :global,
             :owner => :kanto_reloaded,
             :values => frames,
             :default => default_menu_frame_index,
@@ -362,6 +370,7 @@ module KantoReloaded
           :description => "When On, speech and dialogue boxes use the selected menu frame.",
           :type => :toggle,
           :category => :interface,
+          :scope => :global,
           :owner => :kanto_reloaded,
           :value_style => :integer,
           :default => DEFAULT_SPEECH_FOLLOWS_MENU,
@@ -430,6 +439,7 @@ module KantoReloaded
           :description => description,
           :type => :enum,
           :category => :interface,
+          :scope => :global,
           :owner => :kanto_reloaded,
           :values => values,
           :default => default,

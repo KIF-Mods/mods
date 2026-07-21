@@ -10,7 +10,8 @@ module KantoReloaded
       :interface,
       :gameplay,
       :quality_of_life,
-      :economy
+      :economy,
+      :utility
     ].freeze
 
     class << self
@@ -347,14 +348,14 @@ module KantoReloaded
         end
 
         def categories_with_definitions
-          KantoReloaded::Settings.categories.select do |category|
-            ROOT_CATEGORY_IDS.include?(category[:id])
-          end.map do |category|
+          ROOT_CATEGORY_IDS.map do |category_id|
+            category = KantoReloaded::Settings.category(category_id)
+            next nil unless category
             definitions = SettingsUI.definitions_for(:category => category[:id], :scene => self).reject do |definition|
               definition[:owner] == KantoReloaded::MSMCompatibility::LEGACY_OWNER
             end
             [category, definitions]
-          end
+          end.compact
         end
       end
 
