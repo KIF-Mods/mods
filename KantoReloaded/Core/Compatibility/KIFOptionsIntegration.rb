@@ -131,6 +131,7 @@ module KantoReloaded
 
       def setup_scene(scene)
         return false unless style_scene?(scene)
+        return false unless hint_footer_enabled?(scene)
         sprites = scene.instance_variable_get(:@sprites)
         viewport = scene.instance_variable_get(:@viewport)
         return false unless sprites.is_a?(Hash) && viewport && defined?(Sprite) && defined?(Bitmap)
@@ -156,12 +157,14 @@ module KantoReloaded
           scene.instance_variable_set(:@kr_frame_signature, signature)
         end
         KantoReloaded::MouseInput.update if defined?(KantoReloaded::MouseInput)
-        if defined?(KantoReloaded::HintText) && KantoReloaded::HintText.triggered? && !KantoReloaded::UI::Modal.active?
-          KantoReloaded::HintText.open_popup(_INTL("Options Controls"), hint_entries)
-          draw_footer(scene)
-          return true
+        if hint_footer_enabled?(scene)
+          if defined?(KantoReloaded::HintText) && KantoReloaded::HintText.triggered? && !KantoReloaded::UI::Modal.active?
+            KantoReloaded::HintText.open_popup(_INTL("Options Controls"), hint_entries)
+            draw_footer(scene)
+            return true
+          end
+          handle_footer_mouse(scene)
         end
-        handle_footer_mouse(scene)
         false
       rescue StandardError => e
         KantoReloaded::Log.exception("KR options scene update failed", e, channel: :ui) if defined?(KantoReloaded::Log)
@@ -257,6 +260,29 @@ module KantoReloaded
         scene && scene.class == PokemonOption_Scene
       rescue
         false
+      end
+
+      def hint_footer_enabled?(scene)
+        options = Array(scene.instance_variable_get(:@PokemonOptions))
+        options.any? { |option| adjustable_option?(option) }
+      rescue
+        false
+      end
+
+      def adjustable_option?(option)
+        return false if defined?(ButtonOption) && option.is_a?(ButtonOption)
+        if defined?(KantoReloaded::Options)
+          non_adjustable = [
+            KantoReloaded::Options::Spacer,
+            KantoReloaded::Options::CategoryHeader,
+            KantoReloaded::Options::ActionButton,
+            KantoReloaded::Options::TextDisplayOption
+          ].select { |klass| klass.is_a?(Class) }
+          return false if non_adjustable.any? { |klass| option.is_a?(klass) }
+        end
+        true
+      rescue
+        true
       end
 
       def open_settings_from(scene)

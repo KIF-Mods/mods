@@ -11,7 +11,7 @@ end
 module KantoReloaded
   module BugReport
     PASTE_URL = "https://paste.rs/"
-    BUG_REPORT_THREAD_URL = "https://discord.com/channels/1121345297352753243/1518892862429855794"
+    BUG_REPORT_THREAD_URL = "https://discord.com/channels/1121345297352753243/1529078153786429552/1529078153786429552"
     MAX_REPORT_BYTES = 5 * 1024 * 1024
     NETWORK_TIMEOUT_SECONDS = 8
 
