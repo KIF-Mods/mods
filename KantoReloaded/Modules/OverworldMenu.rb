@@ -624,9 +624,13 @@ class OverworldMenuScene
         if status.empty?
           pbDrawShadowText(b, PAD + 2, y, PANEL_W - PAD * 2, ROW_H - 2, entries[idx][:label].to_s, color, C_SHADOW)
         else
+          row_inner_w = PANEL_W - PAD * 2
           measured_status_w = b.text_size(status).width rescue 18
-          status_w = [[measured_status_w + 8, 24].max, PANEL_W / 3].min
-          label_w = PANEL_W - PAD * 2 - status_w - 4
+          measured_label_w = b.text_size(entries[idx][:label].to_s).width rescue 48
+          desired_label_w = [measured_label_w + 4, 48].max
+          max_status_w = [row_inner_w - desired_label_w - 4, 24].max
+          status_w = [[measured_status_w + 8, 24].max, max_status_w].min
+          label_w = row_inner_w - status_w - 4
           pbDrawShadowText(b, PAD + 2, y, label_w, ROW_H - 2, entries[idx][:label].to_s, color, C_SHADOW)
           pbDrawShadowText(b, PANEL_W - PAD - status_w, y, status_w, ROW_H - 2, status, entry_status_color(entries[idx]), C_SHADOW, 2)
         end

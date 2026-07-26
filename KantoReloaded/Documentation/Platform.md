@@ -29,8 +29,9 @@ KantoReloaded::Platform.glob(File.join(path, "**", "*.json"))
 used in user-facing errors instead of exposing a full local filesystem path.
 
 Windows and Proton expose guarded clipboard and URL-opening adapters. JoiPlay
-and unknown runtimes report these desktop capabilities as unavailable so
-callers can provide an in-game fallback.
+feature-detects clipboard writes through `Input.clipboard=` but continues to
+report desktop URL opening as unavailable. Unknown runtimes report both
+capabilities as unavailable so callers can provide an in-game fallback.
 
 ## JSON
 
@@ -48,3 +49,18 @@ text = KantoReloaded::Platform.generate_json(data)
 `set_override` is runtime-only and intended for debug tools and contract tests.
 It does not persist into save data or settings. Call `clear_override` to return
 to automatic detection.
+
+## JoiPlay UI Compatibility
+
+Some KIF builds declare the `GenOneStyle` title-screen disposal helpers after
+the class has already closed. This places `dispose` on `Object`, where JoiPlay
+can recursively invoke it while KR menus release unrelated UI helpers.
+
+On JoiPlay, KR detects that exact malformed method layout, restores the methods
+directly to `GenOneStyle`, and guards the accidental global `dispose` fallback.
+The workaround is not installed on Windows, Proton, or KIF builds where
+`GenOneStyle` already owns its disposal method.
+
+KR global settings and KIF Settings Preset compatibility use the platform
+user-data directory on JoiPlay instead of attempting to create `.kro` files in
+the read-only game directory.

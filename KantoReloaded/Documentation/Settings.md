@@ -45,6 +45,21 @@ KantoReloaded::Settings.set(:battle_style, 1)
 KantoReloaded::Settings.reset(:battle_style)
 ```
 
+## KIF Settings Presets
+
+KIF's existing Save & Load Options scene remains the preset entry point. KR
+extends each preset with a versioned `kanto_reloaded` section containing every
+registered value setting, including global and per-save values. Action buttons
+and non-setting module data such as customized Battle Menu pages are excluded.
+
+Loading a preset first restores KIF's native options, then imports KR values
+through the settings registry and reapplies callbacks after all values are in
+place. Older `.kro` presets without KR data remain compatible.
+
+On JoiPlay, preset files and names use KR's writable user-data directory and
+portable path separators. Existing preset locations are still checked while
+loading.
+
 ## Categories
 
 ```ruby

@@ -1045,7 +1045,7 @@ module KantoReloaded
           :category => :interface,
           :owner => :kanto_reloaded,
           :priority => 90,
-          :metadata => { "after" => "battle_menu" },
+          :metadata => { "after" => "move_effectiveness_settings" },
           :enabled_if => proc { defined?($Trainer) && $Trainer && !BattleCommandMenu.all_registered_entries.empty? },
           :on_press => proc { BattleCommandMenu.open_editor }
         })

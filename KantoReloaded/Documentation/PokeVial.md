@@ -71,13 +71,19 @@ PokeVial preserves KIF's restricted-map list for its former Heal Pokemon
 command and also blocks Safari, Bug Contest, and battle use. KIF's existing
 `DemICE.krs` bypass remains supported.
 
-PokeCenter recovery is identified through guarded wrappers around
-`Interpreter#command_314` and `Trainer#heal_party`. The native heal runs first
-and retains its return value. Ask mode prompts before restoring missing charges,
-Automatic mode refills without a confirmation, and Never mode skips refills.
-The refill result reports both restored charges and any money spent. A refill
-is only considered while a Recover All event is running on the current
-registered PokeCenter map. PokeVial's own healing cannot trigger a refill.
+PokeCenter recovery is identified through a guarded wrapper around
+`command_314` on every available KIF interpreter class. This supports the
+native `Interpreter` class and JoiPlay hosts that expose `Game_Interpreter`.
+The native Recover All command runs first and retains its return value, then
+PokeVial performs its refill check directly without depending on
+`Trainer#heal_party` chaining.
+
+The current registered PokeCenter map remains the primary location check.
+PokeCenter map metadata and normalized map names provide portable fallbacks
+when a JoiPlay save has not synchronized that map ID. Ask mode prompts before
+restoring missing charges, Automatic mode refills without a confirmation, and
+Never mode skips refills. The refill result reports both restored charges and
+any money spent. PokeVial's own healing cannot trigger a refill.
 
 Successful PokeVial healing plays KIF's `Recovery` sound. With Progressive Uses
 enabled, every two Badges unlock one additional maximum charge. The newly

@@ -35,6 +35,11 @@ panels as Hoenn Reloaded. The shared Mart picker also exposes the matching
 green sale-total presentation for any future Reloaded Mart sell flow; the KIF
 Kuray Shop integration itself remains buy-only.
 
+Bulk purchases award one bonus item for every complete group of ten:
+
+- every 10 Poke Balls award 1 Premier Ball
+- every 10 DNA Splicers award 1 DNA Reverser
+
 Open the catalog editor from **Quality of Life > Reloaded Shop**. The editor
 uses Left/Right to change panels and Action to add a category or item.
 

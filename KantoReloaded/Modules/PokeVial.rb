@@ -32,7 +32,6 @@ module KantoReloaded
       776, 777, 778, 779, 780, 781, 782, 783, 784
     ].freeze
 
-    @recover_all_depth = 0
     @healing_from_vial = false
     @refill_prompt_active = false
     @progression_step_event_registered = false unless
@@ -219,18 +218,13 @@ module KantoReloaded
         end
       end
 
-      def with_recover_all_context
-        @recover_all_depth = @recover_all_depth.to_i + 1
-        yield
-      ensure
-        @recover_all_depth = [@recover_all_depth.to_i - 1, 0].max
-      end
-
-      def after_native_party_heal
+      def after_recover_all_command
         return false unless enabled?
         return false if @healing_from_vial
-        return false unless @recover_all_depth.to_i > 0
-        return false unless pokemon_center_map?
+        unless pokemon_center_map?
+          log_refill_skip("not_pokemon_center")
+          return false
+        end
         sync_progressive_capacity
         prompt_pokemon_center_refill
       rescue StandardError => e
@@ -433,38 +427,35 @@ module KantoReloaded
           results << false
         end
 
-        if defined?(Interpreter)
-          results << KantoReloaded::Hooks.wrap(
-            Interpreter,
+        results << register_recover_all_hooks
+
+        results.all?
+      end
+
+      def register_recover_all_hooks
+        targets = []
+        targets << Interpreter if defined?(Interpreter)
+        targets << Game_Interpreter if defined?(Game_Interpreter)
+        targets = targets.uniq
+        return false if targets.empty?
+
+        installed = false
+        targets.each do |target|
+          wrapped = KantoReloaded::Hooks.wrap(
+            target,
             :command_314,
             :poke_vial_recover_all
           ) do |hook, *_arguments|
-            parameters = instance_variable_get(:@parameters)
-            if Array(parameters)[0].to_i == 0
-              KantoReloaded::PokeVial.with_recover_all_context { hook.call }
-            else
-              hook.call
-            end
-          end
-        else
-          results << false
-        end
-
-        if defined?(Trainer)
-          results << KantoReloaded::Hooks.wrap(
-            Trainer,
-            :heal_party,
-            :poke_vial_center_refill
-          ) do |hook, *_arguments|
+            parameters = hook.receiver.instance_variable_get(:@parameters)
             result = hook.call
-            KantoReloaded::PokeVial.after_native_party_heal
+            if Array(parameters)[0].to_i == 0
+              KantoReloaded::PokeVial.after_recover_all_command
+            end
             result
           end
-        else
-          results << false
+          installed = true if wrapped
         end
-
-        results.all?
+        installed
       end
 
       def register_events
@@ -660,11 +651,46 @@ module KantoReloaded
       end
 
       def pokemon_center_map?
-        return false unless defined?($PokemonGlobal) && $PokemonGlobal
-        center_id = $PokemonGlobal.pokecenterMapId.to_i
-        center_id >= 0 && center_id == current_map_id
+        map_id = current_map_id
+        return false if map_id <= 0
+
+        if defined?($PokemonGlobal) && $PokemonGlobal
+          center_id = $PokemonGlobal.pokecenterMapId.to_i
+          return true if center_id > 0 && center_id == map_id
+        end
+
+        if defined?(GameData::MapMetadata)
+          metadata = GameData::MapMetadata.try_get(map_id)
+          if metadata && metadata.respond_to?(:teleport_destination)
+            return true if metadata.teleport_destination
+          end
+        end
+
+        return false unless defined?(pbGetBasicMapNameFromId)
+        name = pbGetBasicMapNameFromId(map_id).to_s.downcase
+        normalized = name.gsub(/[^a-z0-9]+/, " ").strip
+        normalized.include?("pokemon center") ||
+          normalized.include?("poke center") ||
+          normalized.include?("pok mon center") ||
+          normalized.include?("pokecenter")
       rescue StandardError
         false
+      end
+
+      def log_refill_skip(reason)
+        return unless defined?(KantoReloaded::Log)
+        center_id = if defined?($PokemonGlobal) && $PokemonGlobal
+                      $PokemonGlobal.pokecenterMapId.to_i
+                    else
+                      0
+                    end
+        KantoReloaded::Log.debug(
+          "PokeVial refill skipped reason=#{reason} " \
+          "map=#{current_map_id} saved_center=#{center_id}",
+          :modules
+        )
+      rescue StandardError
+        nil
       end
 
       def prompt_pokemon_center_refill

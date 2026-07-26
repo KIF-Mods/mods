@@ -98,7 +98,10 @@ module KantoReloaded
       def storage_path
         return @storage_path if @storage_path
         folder = nil
-        if defined?(RTP) && RTP.respond_to?(:getSaveFolder)
+        if defined?(KantoReloaded::Platform) && KantoReloaded::Platform.joiplay?
+          folder = KantoReloaded::Platform.user_data_directory
+        end
+        if folder.to_s.empty? && defined?(RTP) && RTP.respond_to?(:getSaveFolder)
           folder = RTP.getSaveFolder rescue nil
         end
         if folder.to_s.empty? && defined?(KantoReloaded::Platform)

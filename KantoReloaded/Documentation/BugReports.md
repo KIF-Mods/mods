@@ -14,10 +14,10 @@ The action:
    available.
 4. Opens the bug-report Discord thread when URL opening is supported.
 
-Windows and Proton expose the complete clipboard and browser workflow.
-JoiPlay and unknown runtimes still create the local report and attempt the
-upload; when desktop actions are unavailable, KR shows the uploaded URL or the
-local report path instead.
+Windows and Proton expose the complete clipboard and browser workflow. JoiPlay
+copies the raw uploaded URL when its RPG Maker runtime exposes
+`Input.clipboard=`. If clipboard or browser actions are unavailable, KR shows
+the uploaded URL or the local report path instead.
 
 The export runs behind a cancellable KR-styled progress popup. Cancelling the
 upload does not delete the local report.

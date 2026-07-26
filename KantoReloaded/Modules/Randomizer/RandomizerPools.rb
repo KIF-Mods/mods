@@ -11,6 +11,18 @@ module KantoReloaded
       ATTEMPTS_PER_RANGE = 48
       RANGE_EXPANSIONS = [0, 25, 50, 100, 200, 9999].freeze
       INTERNAL_ITEM_TOKENS = ["DEBUG", "DUMMY", "PLACEHOLDER", "UNUSED", "INVALID"].freeze
+      INTERNAL_ABILITY_IDS = [:NONE].freeze
+      SPECIES_ABILITY_CHANCE = 25
+      OWNER_RESTRICTED_ABILITY_IDS = [
+        :DISGUISE,
+        :POWERCONSTRUCT,
+        :SCHOOLING,
+        :SHIELDSDOWN,
+        :STANCECHANGE,
+        :TERASHIFT,
+        :ZENMODE,
+        :ZEROTOHERO
+      ].freeze
 
       class << self
         def choose_species(source_species, recent_species = [])
@@ -60,6 +72,92 @@ module KantoReloaded
           nil
         end
 
+        def choose_ability(excluded = [])
+          blocked = Array(excluded).compact.map { |value| ability_id(value) }.compact
+          candidates = ability_pool.reject { |id| blocked.include?(id) }
+          return nil if candidates.empty?
+          candidates[rand(candidates.length)]
+        rescue StandardError => e
+          log_exception("Dynamic ability selection failed", e)
+          nil
+        end
+
+        def choose_ability_for_species(species_data, excluded = [])
+          blocked = Array(excluded).compact.map { |value| ability_id(value) }.compact
+          restricted = restricted_abilities_for_species(species_data).reject do |id|
+            blocked.include?(id)
+          end
+          if !restricted.empty? && rand(100) < SPECIES_ABILITY_CHANCE
+            return restricted[rand(restricted.length)]
+          end
+          choose_ability(blocked) ||
+            (restricted.empty? ? nil : restricted[rand(restricted.length)])
+        rescue StandardError => e
+          log_exception("Species-aware ability selection failed", e)
+          choose_ability(excluded)
+        end
+
+        def choose_ability_pair(first_species_data = nil, second_species_data = nil)
+          return nil if ability_candidates_for_species(first_species_data).empty?
+          return nil if ability_candidates_for_species(second_species_data).empty?
+          attempts = [[ability_pool.length * 2, 16].max, 128].min
+          attempts.times do
+            first = choose_ability_for_species(first_species_data)
+            second = choose_ability_for_species(second_species_data, [first])
+            next unless KantoReloaded::DoubleAbilities.pair_legal?(first, second)
+            return [first, second]
+          end
+          ability_candidates_for_species(first_species_data).each do |first|
+            second = ability_candidates_for_species(
+              second_species_data,
+              [first]
+            ).find do |candidate|
+              KantoReloaded::DoubleAbilities.pair_legal?(first, candidate)
+            end
+            return [first, second] if second
+          end
+          nil
+        rescue StandardError => e
+          log_exception("Dynamic ability pair selection failed", e)
+          nil
+        end
+
+        def restricted_abilities_for_species(species_data)
+          data = normalize_species_data(species_data)
+          return [] unless data
+          values = Array(data.abilities) + Array(data.hidden_abilities)
+          values.map { |value| ability_id(value) }.compact.select do |id|
+            registered_owner_restricted_abilities.include?(id)
+          end.uniq
+        rescue StandardError
+          []
+        end
+
+        def register_owner_restricted_ability(ability)
+          id = raw_ability_id(ability)
+          return false unless id
+          values = additional_owner_restricted_ability_ids
+          values << id unless values.include?(id)
+          @registered_owner_restricted_abilities = nil
+          @ability_pool = nil
+          @ability_pool_signature = nil
+          true
+        rescue StandardError
+          false
+        end
+
+        def ability_count
+          ability_pool.length
+        rescue StandardError
+          0
+        end
+
+        def restricted_ability_count
+          registered_owner_restricted_abilities.length
+        rescue StandardError
+          0
+        end
+
         def protected_item?(item)
           return true unless item
           return true if item.respond_to?(:is_key_item?) && item.is_key_item?
@@ -78,6 +176,10 @@ module KantoReloaded
           @custom_species_ids = nil
           @species_bst = nil
           @legendary = nil
+          @ability_pool = nil
+          @ability_pool_signature = nil
+          @registered_owner_restricted_abilities = nil
+          @family_boosted_abilities = nil
           true
         end
 
@@ -99,6 +201,87 @@ module KantoReloaded
               !item.is_machine? && !item.is_key_item? && !item.is_berry?
             end
           end
+        end
+
+        def ability_pool
+          signature = GameData::Ability::DATA.length
+          return @ability_pool if @ability_pool &&
+                                  @ability_pool_signature == signature
+          @registered_owner_restricted_abilities = nil
+          @family_boosted_abilities = nil
+          values = []
+          GameData::Ability.each do |ability|
+            id = ability_id(ability)
+            next unless id
+            next if INTERNAL_ABILITY_IDS.include?(id)
+            next if registered_owner_restricted_abilities.include?(id)
+            next if family_boosted_abilities.include?(id)
+            values << id
+          end
+          @ability_pool_signature = signature
+          @ability_pool = values.uniq
+        end
+
+        def ability_candidates_for_species(species_data, excluded = [])
+          blocked = Array(excluded).compact.map { |value| ability_id(value) }.compact
+          values = ability_pool + restricted_abilities_for_species(species_data)
+          values.uniq.reject { |id| blocked.include?(id) }
+        end
+
+        def ability_id(value)
+          data = GameData::Ability.try_get(value)
+          data ? data.id : nil
+        rescue StandardError
+          nil
+        end
+
+        def registered_owner_restricted_abilities
+          return @registered_owner_restricted_abilities if @registered_owner_restricted_abilities
+          values = OWNER_RESTRICTED_ABILITY_IDS +
+                   additional_owner_restricted_ability_ids
+          @registered_owner_restricted_abilities =
+            values.map do |id|
+              ability_id(id)
+            end.compact.uniq
+        end
+
+        def additional_owner_restricted_ability_ids
+          @additional_owner_restricted_ability_ids ||= []
+        end
+
+        def raw_ability_id(value)
+          data = GameData::Ability.try_get(value)
+          return data.id if data
+          return value.id.to_sym if value.respond_to?(:id) &&
+                                    value.id.respond_to?(:to_sym)
+          value.respond_to?(:to_sym) ? value.to_sym : nil
+        rescue StandardError
+          value.respond_to?(:to_sym) ? value.to_sym : nil
+        end
+
+        def normalize_species_data(value)
+          return value if value.respond_to?(:abilities) &&
+                          value.respond_to?(:hidden_abilities)
+          GameData::Species.try_get(value)
+        rescue StandardError
+          nil
+        end
+
+        def family_boosted_abilities
+          return @family_boosted_abilities if @family_boosted_abilities
+          values = []
+          if defined?(PokemonFamilyConfig) &&
+             PokemonFamilyConfig.const_defined?(:FAMILY_TALENTS)
+            talents = PokemonFamilyConfig.const_get(:FAMILY_TALENTS)
+            talents.each_value do |entry|
+              next unless entry.is_a?(Hash)
+              id = ability_id(entry[:boosted])
+              values << id if id
+            end
+          end
+          @family_boosted_abilities = values.uniq
+        rescue StandardError
+          @family_boosted_abilities = []
         end
 
         def protected_item_ids

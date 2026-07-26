@@ -156,6 +156,26 @@ module KantoReloaded
         [entry[:base], entry[:shadow]]
       end
 
+      def read_only_text_colors
+        base, shadow = option_text_colors
+        [
+          Color.new(
+            base.red * 3 / 4,
+            base.green * 3 / 4,
+            base.blue * 3 / 4,
+            base.alpha
+          ),
+          Color.new(
+            shadow.red * 4 / 5,
+            shadow.green * 4 / 5,
+            shadow.blue * 4 / 5,
+            shadow.alpha
+          )
+        ]
+      rescue
+        [Color.new(144, 150, 158), Color.new(54, 58, 64)]
+      end
+
       def category_text_colors
         entry = color_theme(category_theme_index)
         return readable_text_colors if !current_menu_frame_dark? && entry[:id] == :white
@@ -628,7 +648,8 @@ module KantoReloaded
           @name = name
           @value_proc = value_proc
         end
-        def non_interactive?; true; end
+        def non_interactive?; false; end
+        def read_only?; true; end
         def get; 0; end
         def set(_value); end
         def values; [current_text]; end
@@ -720,7 +741,8 @@ if defined?(Window_PokemonOption)
 
     def update
       old_index = self.index
-      suppress_horizontal = self.active && action_option_at?(self.index) &&
+      suppress_horizontal = self.active &&
+        (action_option_at?(self.index) || read_only_option_at?(self.index)) &&
         (Input.repeat?(Input::LEFT) || Input.repeat?(Input::RIGHT))
       if suppress_horizontal
         was_active = self.active
@@ -939,6 +961,7 @@ if defined?(Window_PokemonOption)
       return if index >= @options.length
       option = @options[index]
       return if non_interactive?(option)
+      return if read_only_option?(option)
       activated_action = false
       if option.is_a?(KantoReloaded::Options::CollapsibleHeader)
         option.toggle
@@ -979,6 +1002,17 @@ if defined?(Window_PokemonOption)
       defined?(ButtonOption) && option.is_a?(ButtonOption)
     rescue
       false
+    end
+
+    def read_only_option?(option)
+      option.respond_to?(:read_only?) && option.read_only?
+    rescue
+      false
+    end
+
+    def read_only_option_at?(index)
+      return false if index.nil? || index < 0 || index >= @options.length
+      read_only_option?(@options[index])
     end
 
     def label_width(rect)
@@ -1046,8 +1080,12 @@ if defined?(Window_PokemonOption)
     def draw_text_display(option, index, rect, disabled = false)
       rect = drawCursor(index, rect)
       label_w = label_width(rect)
-      base = disabled ? Color.new(144, 150, 158) : @nameBaseColor
-      shadow = disabled ? Color.new(54, 58, 64) : @nameShadowColor
+      dimmed = disabled || read_only_option?(option)
+      base, shadow = if dimmed
+                       KantoReloaded::Options.read_only_text_colors
+                     else
+                       [@nameBaseColor, @nameShadowColor]
+                     end
       pbDrawShadowText(self.contents, rect.x, rect.y, label_w, rect.height, option.name, base, shadow)
       value = option.current_text
       value_width = [
@@ -1068,7 +1106,18 @@ if defined?(Window_PokemonOption)
       values = Array(option.values)
       return if values.empty?
       current = [[(self[index] || 0).to_i, 0].max, values.length - 1].min
-      draw_cycling_value(values[current].to_s, current <= 0, current >= values.length - 1, rect, label_w)
+      if option.respond_to?(:swatch_color)
+        draw_color_cycling_value(
+          values[current].to_s,
+          current <= 0,
+          current >= values.length - 1,
+          option.swatch_color(current),
+          rect,
+          label_w
+        )
+      else
+        draw_cycling_value(values[current].to_s, current <= 0, current >= values.length - 1, rect, label_w)
+      end
     end
 
     def draw_number(option, index, rect)
@@ -1094,6 +1143,37 @@ if defined?(Window_PokemonOption)
                        value, @selBaseColor, @selShadowColor)
       pbDrawShadowText(self.contents, start_x + arrow_w + gap + value_w + gap, rect.y, arrow_w + 4, rect.height,
                        ">", @selBaseColor, @selShadowColor) unless at_max
+    end
+
+    def draw_color_cycling_value(value, at_min, at_max, color, rect, label_w)
+      area_x = rect.x + label_w
+      area_w = rect.width - label_w
+      arrow_w = self.contents.text_size("<").width
+      value_w = self.contents.text_size(value).width
+      swatch_size = 10
+      gap = 5
+      display_w = arrow_w + gap + swatch_size + gap + value_w + gap + arrow_w
+      start_x = area_x + [(area_w - display_w) / 2, 0].max
+      pbDrawShadowText(
+        self.contents, start_x, rect.y, arrow_w + gap, rect.height,
+        "<", @selBaseColor, @selShadowColor
+      ) unless at_min
+      swatch_x = start_x + arrow_w + gap
+      swatch_y = rect.y + [(rect.height - swatch_size) / 2, 0].max - 1
+      KantoReloaded::UI::Draw.rounded_rect(
+        self.contents, swatch_x, swatch_y, swatch_size, swatch_size, 3,
+        color || Color.new(160, 160, 168),
+        Color.new(232, 236, 240)
+      )
+      value_x = swatch_x + swatch_size + gap
+      pbDrawShadowText(
+        self.contents, value_x, rect.y, value_w + 4, rect.height,
+        value, @selBaseColor, @selShadowColor
+      )
+      pbDrawShadowText(
+        self.contents, value_x + value_w + gap, rect.y,
+        arrow_w + 4, rect.height, ">", @selBaseColor, @selShadowColor
+      ) unless at_max
     end
 
     def draw_slider(option, index, rect)

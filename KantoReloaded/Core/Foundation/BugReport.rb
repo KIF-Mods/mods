@@ -138,7 +138,7 @@ module KantoReloaded
 
       def handle_success(outcome)
         url = outcome[:url].to_s
-        link = "[Bug Report](#{url})"
+        link = joiplay? ? url : "[Bug Report](#{url})"
         copied = platform_clipboard_write(link)
         opened = platform_open_url(BUG_REPORT_THREAD_URL)
         if copied && opened
@@ -187,6 +187,14 @@ module KantoReloaded
         return false unless defined?(KantoReloaded::Platform)
         return false unless KantoReloaded::Platform.respond_to?(:clipboard_write)
         KantoReloaded::Platform.clipboard_write(text)
+      rescue
+        false
+      end
+
+      def joiplay?
+        defined?(KantoReloaded::Platform) &&
+          KantoReloaded::Platform.respond_to?(:joiplay?) &&
+          KantoReloaded::Platform.joiplay?
       rescue
         false
       end

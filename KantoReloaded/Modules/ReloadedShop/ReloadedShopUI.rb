@@ -468,18 +468,31 @@ module KantoReloaded
           return display_error(_INTL("There isn't enough room in the Bag."))
         end
         @adapter.setMoney(money - total)
-        award_premier_ball(entry, requested)
+        award_bulk_purchase_bonus(entry, requested)
         pbSEPlay("Mart buy item") if defined?(pbSEPlay)
         play_purchase_animation(entry[:id])
       end
 
-      def award_premier_ball(entry, bought)
+      def award_bulk_purchase_bonus(entry, bought)
         data = GameData::Item.try_get(entry[:id]) rescue nil
-        return unless data && data.is_poke_ball? && bought.to_i >= 10
-        bonus = GameData::Item.try_get(:PREMIERBALL) rescue nil
-        @adapter.addItem(bonus.id) if bonus
+        bonus_count = bought.to_i / 10
+        return 0 unless data && bonus_count > 0
+        bonus_id = if data.is_poke_ball?
+                     :PREMIERBALL
+                   elsif data.id == :DNASPLICERS
+                     :DNAREVERSER
+                   end
+        return 0 unless bonus_id
+        bonus = GameData::Item.try_get(bonus_id) rescue nil
+        return 0 unless bonus
+        awarded = 0
+        bonus_count.times do
+          break unless @adapter.addItem(bonus.id)
+          awarded += 1
+        end
+        awarded
       rescue StandardError
-        nil
+        0
       end
 
       def max_quantity(entry)

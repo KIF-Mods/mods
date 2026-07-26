@@ -9,6 +9,7 @@ module KantoReloaded
     DYNAMIC_WILD_SETTING = :"randomizer.dynamic_wild"
     WILD_MODE_SETTING = :"randomizer.wild_mode"
     DYNAMIC_ITEMS_SETTING = :"randomizer.dynamic_items"
+    DYNAMIC_ABILITIES_SETTING = :"randomizer.dynamic_abilities"
     WILD_MODE_BST = 0
     WILD_MODE_RANDOM = 1
     RECENT_SPECIES_KEY = :recent_wild_species
@@ -52,14 +53,14 @@ module KantoReloaded
       end
 
       def scene_description
-        "Configure runtime randomization that extends KIF's existing randomizer rules."
+        "Configure live randomization for future Pokemon and item generation."
       end
 
       def pbGetOptions(_inloadscreen = false)
         rows = []
         rows << KantoReloaded::Options::CollapsibleHeader.new(
           _INTL("Dynamic Pokemon"),
-          _INTL("Choose a new eligible species whenever a normal wild encounter is selected."),
+          _INTL("Reroll enabled wild, gift, and static Pokemon sources without rebuilding mappings."),
           :collapsed => true
         )
         rows << prerequisite_toggle_row(
@@ -68,6 +69,11 @@ module KantoReloaded
           proc { KantoReloaded::Randomizer.show_prerequisite_message(:wild) }
         )
         rows << setting_row(WILD_MODE_SETTING)
+        rows << text_row(
+          _INTL("Pokemon Sources"),
+          proc { KantoReloaded::Randomizer.pokemon_sources_label },
+          _INTL("Wild is always active; Gifts and Static follow their KIF randomizer toggles. Starters keep KIF's existing mapping.")
+        )
         rows << text_row(
           _INTL("Pokemon Pool"),
           proc { KantoReloaded::Randomizer.pokemon_pool_label },
@@ -84,9 +90,9 @@ module KantoReloaded
           _INTL("Uses KIF's Allow Legendaries option while preserving legendary encounters.")
         )
         rows << KantoReloaded::Options::ActionButton.new(
-          _INTL("Reset Recent Encounters"),
+          _INTL("Reset Recent Pokemon"),
           proc { reset_recent_encounters },
-          _INTL("Clear the recent-species history used to reduce immediate repeats.")
+          _INTL("Clear the recent-species history shared by dynamic Pokemon sources.")
         )
 
         rows << KantoReloaded::Options::CollapsibleHeader.new(
@@ -108,6 +114,33 @@ module KantoReloaded
           _INTL("Item Rules"),
           proc { KantoReloaded::Randomizer.item_rules_label },
           _INTL("Key items, HMs, protected items, and internal items are never selected.")
+        )
+
+        rows << KantoReloaded::Options::CollapsibleHeader.new(
+          _INTL("Dynamic Abilities"),
+          _INTL("Assign random abilities to Pokemon generated after this option is enabled."),
+          :collapsed => true
+        )
+        rows << setting_row(DYNAMIC_ABILITIES_SETTING)
+        rows << text_row(
+          _INTL("Pokemon Scope"),
+          proc { KantoReloaded::Randomizer.ability_scope_label },
+          _INTL("Existing saved Pokemon are never rewritten.")
+        )
+        rows << text_row(
+          _INTL("Fusion Abilities"),
+          proc { KantoReloaded::Randomizer.ability_slots_label },
+          _INTL("Double Abilities supplies two legal, distinct abilities to new fusions.")
+        )
+        rows << text_row(
+          _INTL("Ability Pool"),
+          proc { KantoReloaded::Randomizer.ability_pool_label },
+          _INTL("Uses safe registered KIF and mod abilities while excluding owner-restricted and Family-only talents.")
+        )
+        rows << text_row(
+          _INTL("Species Ability Chance"),
+          proc { KantoReloaded::Randomizer.species_ability_chance_label },
+          _INTL("Eligible species or fusion components have a 25% chance to use one of their native restricted abilities.")
         )
 
         rows << KantoReloaded::Options::ActionButton.new(

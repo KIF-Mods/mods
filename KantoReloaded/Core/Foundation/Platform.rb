@@ -30,7 +30,7 @@ module KantoReloaded
       ],
       :joiplay => [
         :gameplay, :mod_manager, :manual_mods, :settings, :save_data,
-        :data_patches, :filesystem, :json, :touch
+        :data_patches, :filesystem, :json, :touch, :clipboard
       ],
       :unknown => [
         :gameplay, :manual_mods, :settings, :save_data, :data_patches,
@@ -321,7 +321,7 @@ module KantoReloaded
 
       def clipboard_available?
         return false unless Array(CAPABILITIES[id]).include?(:clipboard)
-        defined?(Input) && Input.respond_to?(:clipboard) && Input.respond_to?(:clipboard=)
+        defined?(Input) && Input.respond_to?(:clipboard=)
       rescue
         false
       end

@@ -12,7 +12,12 @@ module KantoReloaded
         return true if @booted
         register_settings
         Migration.install
-        hooks = [DynamicWildPokemon.install, DynamicItems.install, install_summary_hook]
+        hooks = [
+          DynamicPokemon.install,
+          DynamicItems.install,
+          DynamicAbilities.install,
+          install_summary_hook
+        ]
         Migration.migrate! if $game_switches
         @booted = hooks.all?
         state = @booted ? "ready" : "partial"
@@ -28,16 +33,34 @@ module KantoReloaded
         false
       end
 
+      def dynamic_pokemon?
+        dynamic_pokemon_configured? && base_wild_randomization_enabled?
+      end
+
       def dynamic_wild?
-        dynamic_wild_configured? && base_wild_randomization_enabled?
+        dynamic_pokemon?
       end
 
       def dynamic_items?
         dynamic_items_configured? && base_item_randomization_enabled?
       end
 
-      def dynamic_wild_configured?
+      def dynamic_abilities?
+        !!KantoReloaded::Settings.get(DYNAMIC_ABILITIES_SETTING, false)
+      end
+
+      def register_owner_restricted_ability(ability)
+        KantoReloaded::Randomizer::Pools.register_owner_restricted_ability(
+          ability
+        )
+      end
+
+      def dynamic_pokemon_configured?
         !!KantoReloaded::Settings.get(DYNAMIC_WILD_SETTING, false)
+      end
+
+      def dynamic_wild_configured?
+        dynamic_pokemon_configured?
       end
 
       def dynamic_items_configured?
@@ -57,7 +80,7 @@ module KantoReloaded
                   when :wild
                     _INTL(
                       "Enable Pokemon in KIF's Randomizer settings first. " \
-                      "Dynamic Wild Pokemon selects a new species only after " \
+                      "Dynamic Pokemon selects a new species only after " \
                       "KIF's Pokemon randomizer is active."
                     )
                   when :items
@@ -118,6 +141,13 @@ module KantoReloaded
           _INTL("Custom Sprites Only") : _INTL("All Pokemon")
       end
 
+      def pokemon_sources_label
+        sources = [_INTL("Wild")]
+        sources << _INTL("Gifts") if base_switch(:SWITCH_RANDOM_GIFT_POKEMON)
+        sources << _INTL("Static") if base_switch(:SWITCH_RANDOM_STATIC_ENCOUNTERS)
+        sources.join(", ")
+      end
+
       def bst_range_label
         return _INTL("Not Used") unless use_bst_range?
         return _INTL("Default") unless defined?(VAR_RANDOMIZER_WILD_POKE_BST) && $game_variables
@@ -150,11 +180,35 @@ module KantoReloaded
         _INTL("No Item Types Enabled")
       end
 
+      def ability_scope_label
+        _INTL("Newly Generated")
+      end
+
+      def ability_slots_label
+        if defined?(KantoReloaded::DoubleAbilities) &&
+           KantoReloaded::DoubleAbilities.enabled?
+          _INTL("Two per Fusion")
+        else
+          _INTL("One per Pokemon")
+        end
+      end
+
+      def ability_pool_label
+        count = KantoReloaded::Randomizer::Pools.ability_count
+        count > 0 ? _INTL("{1} General", count) : _INTL("Unavailable")
+      end
+
+      def species_ability_chance_label
+        chance = KantoReloaded::Randomizer::Pools::SPECIES_ABILITY_CHANCE
+        _INTL("{1}% Native", chance)
+      end
+
       def summary_lines
         [
-          _INTL("Dynamic Wild Pokemon: {1}", dynamic_wild? ? "On" : "Off"),
+          _INTL("Dynamic Pokemon: {1}", dynamic_pokemon? ? "On" : "Off"),
           _INTL("Wild Selection: {1}", use_bst_range? ? "BST Range" : "Random"),
-          _INTL("Dynamic Items: {1}", dynamic_items? ? "On" : "Off")
+          _INTL("Dynamic Items: {1}", dynamic_items? ? "On" : "Off"),
+          _INTL("Dynamic Abilities: {1}", dynamic_abilities? ? "On" : "Off")
         ]
       end
 
@@ -163,7 +217,7 @@ module KantoReloaded
       def register_settings
         KantoReloaded::Settings.register(SETTINGS_ACTION, {
           :name => "Randomizer",
-          :description => "Configure runtime randomization using KIF's existing rules.",
+          :description => "Configure live Pokemon, item, and ability randomization.",
           :type => :button,
           :category => :gameplay,
           :owner => :kanto_reloaded,
@@ -180,8 +234,8 @@ module KantoReloaded
           context.is_a?(Hash) && !!(context[:randomizer] || context["randomizer"])
         end
         KantoReloaded::Settings.register(DYNAMIC_WILD_SETTING, {
-          :name => "Dynamic Wild Pokemon",
-          :description => "Randomize each future normal wild encounter without rebuilding KIF mappings.",
+          :name => "Dynamic Pokemon",
+          :description => "Reroll future wild encounters and enabled KIF gift or static Pokemon sources.",
           :type => :toggle,
           :default => false,
           :category => :gameplay,
@@ -189,7 +243,7 @@ module KantoReloaded
           :priority => 10,
           :visible_if => visible
         })
-        wild_enabled = proc { KantoReloaded::Randomizer.dynamic_wild? }
+        wild_enabled = proc { KantoReloaded::Randomizer.dynamic_pokemon? }
         KantoReloaded::Settings.register(WILD_MODE_SETTING, {
           :name => "Wild Selection",
           :description => "Match KIF's BST range or choose any eligible Pokemon at random.",
@@ -210,6 +264,16 @@ module KantoReloaded
           :category => :gameplay,
           :owner => MODULE_ID,
           :priority => 30,
+          :visible_if => visible
+        })
+        KantoReloaded::Settings.register(DYNAMIC_ABILITIES_SETTING, {
+          :name => "Dynamic Abilities",
+          :description => "Randomize future Pokemon abilities; this can be changed at any time.",
+          :type => :toggle,
+          :default => false,
+          :category => :gameplay,
+          :owner => MODULE_ID,
+          :priority => 40,
           :visible_if => visible
         })
         true

@@ -32,6 +32,7 @@ module KantoReloaded
       :randomizer      => { :classification => :stable, :constant => "KantoReloaded::Randomizer" },
       :pc_organization => { :classification => :stable, :constant => "KantoReloaded::PCOrganization" },
       :level_locking   => { :classification => :stable, :constant => "KantoReloaded::LevelLocking" },
+      :double_abilities => { :classification => :stable, :constant => "KantoReloaded::DoubleAbilities" },
       :kif_options     => { :classification => :compatibility, :constant => "KantoReloaded::KIFOptionsIntegration" },
       :msm_compatibility => { :classification => :compatibility, :constant => "KantoReloaded::MSMCompatibility" },
       :data_patches    => { :classification => :stable, :constant => "KantoReloaded::DataPatches" },
