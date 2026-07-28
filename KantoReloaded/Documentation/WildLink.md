@@ -78,7 +78,7 @@ fallback species. It never borrows species from Cave or Land tables.
 - Rare Signal uses KIF's native `Settings::POKE_RADAR_ENCOUNTERS` data when
   the current map has an authored Poké Radar species.
 - Maps without an authored rare species receive a deterministic fallback. Wild
-Link calculates the encounter-rate-weighted average BST of the effective
+  Link calculates the encounter-rate-weighted average BST of the effective
   map-wide Land roster across all time periods, targets approximately 50 BST
   above that average, excludes its normal species and legendaries, and chooses
   from the twelve closest matches. The fallback uses the map's Land level range
@@ -124,10 +124,17 @@ Hoenn-style reaction graphics:
 - Skittish and Elusive targets show an exclamation mark and retreat.
 - Calm targets continue roaming and face the player without an alert.
 
+Temperament is deterministic for each species. Wild Link derives the eligible
+temperament pool from that species' offensive, defensive, and Speed stats, then
+uses the species identity to choose consistently from that pool.
+
 When the player leaves detection range, non-fleeing targets return to roaming.
+The base detection radius is six tiles; Search Levels 50 and 200 each reduce it
+by one tile, making advanced targets easier to approach without being noticed.
 Skittish non-shiny targets that remain frightened for too long use a staged
 Hoenn-style escape: they cry, play the flee sound, move away, fade out, and end
-the chain. Shiny targets never flee or distance-despawn.
+the chain. Shiny targets and targets at Search Level 500 or higher never
+distance-despawn. Shiny targets also never enter the staged flee sequence.
 
 ## Progression
 
