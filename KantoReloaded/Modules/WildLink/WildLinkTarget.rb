@@ -163,6 +163,7 @@ module KantoReloaded
       end
 
       def dispose
+        return if disposed?
         self.bitmap.dispose if self.bitmap && !self.bitmap.disposed?
         super
       end
@@ -248,8 +249,8 @@ module KantoReloaded
     end
 
     module Runtime
-      FIELD_METHODS = [:fishing, :headbutt, :rock_smash].freeze
-      DIRECT_METHODS = [:land, :cave, :surf].freeze
+      FIELD_METHODS = [:surf, :fishing, :headbutt, :rock_smash].freeze
+      DIRECT_METHODS = [:land, :cave].freeze
       UPDATE_INTERVAL = 8
       MOVEMENT_INTERVAL = UPDATE_INTERVAL * 2
       CONTINUE_DELAY = 8
@@ -318,13 +319,15 @@ module KantoReloaded
           unless location
             WildLink.message(
               location_failure_message(method[:id]),
-              :theme => :warning
+              :theme => :warning,
+              :force => true
             )
             return false
           end
 
           built[:method_id] = method[:id]
           built[:method_label] = method[:label]
+          built[:encounter_types] = Array(method[:encounter_types]).dup
           built[:map_id] = WildLink.current_map_id
           built[:x] = location[:x]
           built[:y] = location[:y]
@@ -397,6 +400,7 @@ module KantoReloaded
         def update_target_event(event)
           current = target
           return unless current && event == @target_event
+          return if current[:method_id] == :surf
           return unless map_scene_ready?
           frame = Graphics.frame_count rescue 0
           return if @last_behavior_frame &&
@@ -502,7 +506,7 @@ module KantoReloaded
           end
           if level >= 10
             stars = Bonuses.perfect_iv_count(pokemon)
-            lines << _INTL("Potential: {1}/6 perfect IVs", stars)
+            lines << _INTL("Perfect IVs: {1}/6", stars)
           end
           if level >= 15
             item = pokemon.item
@@ -524,19 +528,6 @@ module KantoReloaded
           lines
         rescue StandardError
           []
-        end
-
-        def record_observed_fusion(pokemon)
-          return false unless pokemon && pokemon.respond_to?(:species)
-          return false unless fusion?(pokemon.species)
-          method_id = encounter_method_id
-          return false unless method_id
-          WildLink.record_discovered_fusion(
-            pokemon.species, method_id, pokemon.level, WildLink.current_map_id
-          )
-        rescue StandardError => e
-          WildLink.log_exception("Wild Link fusion discovery failed", e)
-          false
         end
 
         def update_continuation
@@ -562,8 +553,10 @@ module KantoReloaded
           return unless map_scene_ready?
           return if menu_open?
           case current[:method_id]
+          when :surf
+            update_water_indicator(current)
           when :fishing
-            update_fishing_indicator(current)
+            update_water_indicator(current)
           when :headbutt
             update_headbutt_indicator(current)
           end
@@ -571,25 +564,25 @@ module KantoReloaded
           WildLink.log_exception("Wild Link field indicator failed", e)
         end
 
-        def update_fishing_indicator(current)
+        def update_water_indicator(current)
           set = current_spriteset
           return unless set && set.respond_to?(:addUserSprite)
-          if @fishing_ripple_spriteset != set
-            dispose_fishing_ripple
-            @fishing_ripple_spriteset = set
+          if @water_ripple_spriteset != set
+            dispose_water_ripple
+            @water_ripple_spriteset = set
           end
-          return if @fishing_ripple_sprite &&
-                    !@fishing_ripple_sprite.disposed?
+          return if @water_ripple_sprite &&
+                    !@water_ripple_sprite.disposed?
           animation_id = defined?(PUDDLE_ANIMATION_ID) ?
             PUDDLE_ANIMATION_ID : 22
-          @fishing_ripple_sprite = CenteredFieldAnimationSprite.new(
+          @water_ripple_sprite = CenteredFieldAnimationSprite.new(
             animation_id, $game_map, current[:x], current[:y],
             target_viewport, true, 0
           )
-          set.addUserSprite(@fishing_ripple_sprite)
+          set.addUserSprite(@water_ripple_sprite)
         rescue StandardError => e
-          WildLink.log_exception("Wild Link fishing indicator failed", e)
-          @fishing_ripple_sprite = nil
+          WildLink.log_exception("Wild Link water indicator failed", e)
+          @water_ripple_sprite = nil
         end
 
         def update_headbutt_indicator(current)
@@ -792,12 +785,12 @@ module KantoReloaded
           if defined?(::Events)
             ::Events.onMapChange += proc do |_sender, _event|
               runtime = KantoReloaded::WildLink::Runtime
-              runtime.purge_stale_target_events
               if runtime.active?
                 runtime.clear_target(:map_change, true)
               elsif runtime.chain_active?
                 KantoReloaded::WildLink.break_chain
               end
+              runtime.purge_stale_target_events
             end
             ::Events.onMapSceneChange += proc do |_sender, _event|
               KantoReloaded::WildLink::Runtime.purge_stale_target_events
@@ -806,10 +799,6 @@ module KantoReloaded
               runtime = KantoReloaded::WildLink::Runtime
               runtime.update_continuation
               runtime.update_field_indicator
-            end
-            ::Events.onWildPokemonCreate += proc do |_sender, event|
-              pokemon = Array(event)[0]
-              KantoReloaded::WildLink::Runtime.record_observed_fusion(pokemon)
             end
           end
           if defined?(KantoReloaded::Events)
@@ -855,7 +844,7 @@ module KantoReloaded
           when :fishing
             fishing_location
           when :surf
-            tile_location(:water, 3, 8)
+            surf_location
           when :land
             tile_location(:land, 3, 8)
           else
@@ -933,6 +922,10 @@ module KantoReloaded
           nil
         end
 
+        def surf_location
+          tile_location(:water, 3, 8) || tile_location(:water, 1, 8)
+        end
+
         def fishable_from_shore?(shore_x, shore_y, direction, water_x, water_y)
           return false unless $game_map.valid?(water_x, water_y)
           return false if occupied_tile?(water_x, water_y)
@@ -987,7 +980,7 @@ module KantoReloaded
             event && event.x == x && event.y == y &&
               !(event.respond_to?(:erased) && event.erased)
           end
-          terrain = $game_map.terrain_tag(x, y)
+          terrain = $game_map.terrain_tag(x, y, kind == :water)
           case kind
           when :water
             return false unless terrain.can_surf_freely
@@ -1002,7 +995,8 @@ module KantoReloaded
         end
 
         def spawn_visual(current)
-          return spawn_fishing_visual(current) if current[:method_id] == :fishing
+          return spawn_water_visual(current) if
+            [:surf, :fishing].include?(current[:method_id])
           return spawn_headbutt_visual(current) if
             current[:method_id] == :headbutt
           return spawn_rock_smash_visual(current) if
@@ -1032,7 +1026,9 @@ module KantoReloaded
           event.moveto(current[:x], current[:y])
           $game_map.events[event_id] = event if interactive
           sprite = TargetSprite.new(target_viewport, event, current)
-          character_sprites << sprite
+          sprites = character_sprites
+          sprites << sprite
+          @target_sprite_collection = sprites
           @target_event = event
           @target_sprite = sprite
           @target_event_id = interactive ? event_id : nil
@@ -1064,37 +1060,64 @@ module KantoReloaded
           @target_event = nil
           @target_sprite = nil
           @target_event_id = nil
+          set = current_spriteset
+          return false unless set && set.respond_to?(:addUserSprite)
           @rock_indicator_sprite = RockIndicatorSprite.new(
             target_viewport, source_sprite
           )
-          character_sprites << @rock_indicator_sprite
+          set.addUserSprite(@rock_indicator_sprite)
+          @rock_indicator_spriteset = set
           current[:spawn_frame] = Graphics.frame_count rescue 0
           true
         end
 
-        def spawn_fishing_visual(current)
+        def spawn_water_visual(current)
           @target_event = nil
           @target_sprite = nil
           @target_event_id = nil
-          @fishing_ripple_sprite = nil
-          @fishing_ripple_spriteset = nil
+          return false if current[:method_id] == :surf &&
+                          !spawn_surf_trigger(current)
+          @water_ripple_sprite = nil
+          @water_ripple_spriteset = nil
           current[:spawn_frame] = Graphics.frame_count rescue 0
           update_field_indicator
           true
         end
 
+        def spawn_surf_trigger(current)
+          event_id = next_event_id
+          rpg_event = RPG::Event.new(current[:x], current[:y])
+          rpg_event.id = event_id
+          rpg_event.name = "Wild Link Surf Signal"
+          page = rpg_event.pages[0]
+          page.graphic.character_name = ""
+          page.move_type = 0
+          page.walk_anime = false
+          page.step_anime = false
+          page.direction_fix = true
+          page.through = true
+          page.always_on_top = false
+          page.trigger = 1
+          event = TargetEvent.new(
+            $game_map.map_id, rpg_event, $game_map, current, true
+          )
+          event.moveto(current[:x], current[:y])
+          $game_map.events[event_id] = event
+          @target_event = event
+          @target_event_id = event_id
+          true
+        rescue StandardError => e
+          WildLink.log_exception("Wild Link Surf trigger failed", e)
+          false
+        end
+
         def dispose_visual
-          dispose_fishing_ripple
+          dispose_water_ripple
           dispose_headbutt_rustle
-          if @rock_indicator_sprite
-            character_sprites.delete(@rock_indicator_sprite) rescue nil
-            @rock_indicator_sprite.dispose unless
-              @rock_indicator_sprite.disposed? rescue nil
-          end
-          if @target_sprite
-            character_sprites.delete(@target_sprite) rescue nil
-            @target_sprite.dispose unless @target_sprite.disposed? rescue nil
-          end
+          dispose_owned_user_sprite(
+            @rock_indicator_spriteset, @rock_indicator_sprite
+          )
+          dispose_owned_sprite(@target_sprite_collection, @target_sprite)
           if @target_event_id && $game_map && $game_map.events
             event = $game_map.events[@target_event_id]
             $game_map.events.delete(@target_event_id) if event == @target_event
@@ -1102,44 +1125,69 @@ module KantoReloaded
           @target_sprite = nil
           @target_event = nil
           @target_event_id = nil
+          @target_sprite_collection = nil
           @rock_indicator_sprite = nil
+          @rock_indicator_spriteset = nil
           @headbutt_source_sprite = nil
           @headbutt_rustle_sprite = nil
           @headbutt_rustle_spriteset = nil
           @last_behavior_frame = nil
-          @fishing_ripple_sprite = nil
-          @fishing_ripple_spriteset = nil
+          @water_ripple_sprite = nil
+          @water_ripple_spriteset = nil
         rescue StandardError => e
           WildLink.log_exception("Wild Link visual cleanup failed", e)
           @target_sprite = nil
           @target_event = nil
           @target_event_id = nil
+          @target_sprite_collection = nil
           @rock_indicator_sprite = nil
+          @rock_indicator_spriteset = nil
           @headbutt_source_sprite = nil
           @headbutt_rustle_sprite = nil
           @headbutt_rustle_spriteset = nil
-          @fishing_ripple_sprite = nil
-          @fishing_ripple_spriteset = nil
+          @water_ripple_sprite = nil
+          @water_ripple_spriteset = nil
         end
 
-        def dispose_fishing_ripple
-          return unless @fishing_ripple_sprite
-          @fishing_ripple_sprite.dispose unless
-            @fishing_ripple_sprite.disposed?
+        def dispose_water_ripple
+          return unless @water_ripple_sprite
+          dispose_owned_user_sprite(
+            @water_ripple_spriteset, @water_ripple_sprite
+          )
         rescue StandardError
           nil
         ensure
-          @fishing_ripple_sprite = nil
+          @water_ripple_sprite = nil
+          @water_ripple_spriteset = nil
         end
 
         def dispose_headbutt_rustle
           return unless @headbutt_rustle_sprite
-          @headbutt_rustle_sprite.dispose unless
-            @headbutt_rustle_sprite.disposed?
+          dispose_owned_user_sprite(
+            @headbutt_rustle_spriteset, @headbutt_rustle_sprite
+          )
         rescue StandardError
           nil
         ensure
           @headbutt_rustle_sprite = nil
+          @headbutt_rustle_spriteset = nil
+        end
+
+        def dispose_owned_sprite(collection, sprite)
+          return unless sprite
+          collection.delete(sprite) if collection.respond_to?(:delete)
+          sprite.dispose unless sprite.disposed?
+        rescue StandardError
+          nil
+        end
+
+        def dispose_owned_user_sprite(spriteset, sprite)
+          return unless sprite
+          users = spriteset.instance_variable_get(:@usersprites) if spriteset
+          users.delete(sprite) if users.respond_to?(:delete)
+          sprite.dispose unless sprite.disposed?
+        rescue StandardError
+          nil
         end
 
         def target_viewport
@@ -1223,9 +1271,13 @@ module KantoReloaded
                    else
                      data
                    end
-          "Followers/#{source.id}"
+          character = "Followers/#{source.id}"
+          return character if pbResolveBitmap(
+            "Graphics/Characters/#{character}"
+          )
+          "Followers/PIKACHU"
         rescue StandardError
-          "Followers/000"
+          "Followers/PIKACHU"
         end
 
         def target_asset_path(current)
@@ -1561,6 +1613,8 @@ module KantoReloaded
 
         def encounter_type_for(current)
           case current[:method_id]
+          when :surf
+            Array(current[:encounter_types])[0] || :Water
           when :fishing then :SuperRod
           when :headbutt then :HeadbuttHigh
           when :rock_smash then :RockSmash
@@ -1574,6 +1628,7 @@ module KantoReloaded
             GameData::Species.get(current[:species]).name
           if FIELD_METHODS.include?(current[:method_id])
             action = case current[:method_id]
+                     when :surf then _INTL("Surf to the ripple.")
                      when :fishing then _INTL("Use a fishing rod at the signal.")
                      when :headbutt then _INTL("Use Headbutt on the marked tree.")
                      else _INTL("Use Rock Smash on the marked rock.")
@@ -1599,6 +1654,8 @@ module KantoReloaded
 
         def location_failure_message(method_id)
           case method_id
+          when :surf
+            _INTL("No reachable Surf signal could be placed in nearby water.")
           when :fishing
             _INTL("No reachable fishing signal could be placed nearby.")
           when :headbutt

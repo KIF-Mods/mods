@@ -65,10 +65,14 @@ module KantoReloaded
             if copied
               instance_variable_set(:@ability2_id, copied)
               instance_variable_set(:@kr_double_abilities_transformed, true)
+              runtime.invalidate_battler_cache(self)
+              runtime.refresh_eligibility_cache(self)
               runtime.validate_battle_pair(self)
             else
               instance_variable_set(:@ability2_id, nil)
               instance_variable_set(:@kr_double_abilities_transformed, nil)
+              runtime.invalidate_battler_cache(self)
+              runtime.refresh_eligibility_cache(self)
             end
             result
           end

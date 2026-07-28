@@ -2,100 +2,13 @@
 
 SUMMARY
 -------
-Kanto Reloaded implements an owned two-ability system for newly created fusion
-Pokemon. This document records behavior that differs from KIF's normal
-one-ability behavior.
-
-- Double Abilities defaults to `Off` and is available directly in Gameplay.
-- KR's `:double_abilities` setting is authoritative.
-- KR never enables or mirrors KIF's `SWITCH_DOUBLE_ABILITIES`.
-- Enabling KR while KIF's system is active presents a serious confirmation
-  prompt. Continuing disables KIF's switch first; Back leaves KR disabled.
-- A single-species Pokemon keeps one active ability.
-- A newly created, newly generated, or newly reversed fusion can receive
-  Ability 1 and Ability 2.
-- Existing Pokemon are never backfilled when the setting is enabled or a save
-  is loaded.
-- Unfusion clears KR pair metadata from the retained single-species Pokemon
-  after KIF completes the operation.
-- Turning the setting Off hides and deactivates Ability 2 without erasing it.
-- KIF's existing `ability2` and `ability2_index` fields store the pair.
-- KR-owned source and version metadata is included in KIF's Pokemon JSON
-  import/export data.
-- Generated fusions preserve their generated primary ability.
-- A generated Ability 2 comes from a different component's normal ability
-  pool and is selected deterministically from the Pokemon's personal ID.
-- Automatic generation does not grant a new hidden ability.
-- Player fusion creation offers legal Ability 1 and Ability 2 choices before
-  continuing through KIF's native nature and nickname flow.
-- Ability selection popups show each ability's description before confirming
-  the choice.
-- Ordinary evolution keeps each ability that remains legal for its owning
-  component. If an evolved component no longer supports its saved ability, KR
-  maps only that slot to the corresponding normal or hidden ability from the
-  evolved component before considering other legal abilities in its pool.
-- Evolution preserves the unaffected component's ability unless changing it is
-  required to avoid a duplicate or hard-blacklisted pair.
-- Reversing a fusion preserves Ability 1 and deterministically regenerates
-  Ability 2 from the reversed component order.
-- A pair cannot contain duplicate abilities or a hard-blacklisted combination.
-- A fusion falls back to one active ability when no legal second ability
-  exists.
-- Triple fusions still have no more than two active abilities. Automatic
-  selection uses two different component pools.
-- Ability 1 remains the value returned by direct compatibility checks such as
-  `battler.ability`.
-- `Pokemon#hasAbility?` recognizes either owned slot. This extends KIF's
-  overworld poison, wild encounter, Pickup, Honey Gather, egg-hatching, form,
-  and compatible mod checks without changing direct `pokemon.ability` reads.
-- `hasActiveAbility?` and `hasWorkingAbility` recognize either active KR slot.
-- KR wraps all 46 KIF `BattleHandlers.trigger...Ability` entry points.
-- Scalar handlers chain Ability 1's result into Ability 2.
-- Boolean immunity, permission, switching, trapping, and escape handlers stop
-  after the first successful result.
-- Other handlers run in slot order and revalidate the battler before Ability 2.
-- KIF's two native end-of-move Ability 2 calls are detected and given slot
-  context instead of being dispatched a second time by KR.
-- Ability splashes reuse EBDX's existing ability bar with the triggering slot's
-  name. KR does not create KIF's unfinished second splash bar.
-- Secondary results that show a splash after their handler returns retain a
-  short-lived source context so the popup, fallback text, and battle debug log
-  identify the correct ability.
-- Temporary battler ability assignments are validated before they can create a
-  duplicate or hard-blacklisted pair.
-- Summary uses Action on page 3 to cycle between `Ability 1` and `Ability 2`.
-- Ability Capsule, Secret Capsule, Ability Ball, and Debug use slot-aware legal
-  choices.
-- Family Pokemon remains owned by the Family system. KR never writes Family
-  ability data and does not dispatch a duplicate KR secondary.
-- KR secondary abilities are disabled in an active Multiplayer battle unless
-  every peer exposes a compatible KR capability and version.
-- Unknown mod-added abilities registered through standard ability data and
-  battle-handler APIs participate automatically.
-- Dynamic Abilities assigns two distinct, hard-blacklist-safe registered
-  abilities to newly generated fusions while the Randomizer setting is On.
-  Each slot independently has a 25% chance to use a form-dependent
-  owner-restricted ability that its source component naturally owns; otherwise
-  it uses the safe general pool. Family Pokemon remain excluded from assignment
-  and rerolling.
-- If an external mod exposes an invalid pair during battle, KR disables only
-  its secondary slot for that battle and logs a sanitized warning.
-- Every KIF integration uses `KantoReloaded::Hooks`; no base, Multiplayer, or
-  Family file is edited.
-- Existing KIF and NPT form behavior remains authoritative. KR re-enters their
-  supported direct checks for secondary Schooling, Power Construct, and
-  Shields Down.
-- Fusion Zen Mode changes only the Darmanitan component between its registered
-  Standard and Zen forms.
-- Fusion Battle Bond uses its documented modern effect because KIF does not
-  register Ash-Greninja component forms.
-- AI scoring for Simple Beam, Worry Seed, Role Play, Entrainment, Skill Swap,
-  and Gastro Acid evaluates both active slots and KR's legal pair rules.
-- Handler-driven battle calculations and `hasActiveAbility?` AI checks use
-  both slots.
-- Wild Link Hidden Ability rolls preserve component ownership and cannot create
-  a duplicate or hard-blacklisted pair.
-- Wild Link scan details show both active ability slots for eligible fusions.
+- Each recorded fusion ability remains attached to its owning component during
+  evolution.
+- If the evolved component still supports that ability, the exact ability is
+  preserved. Otherwise, KR maps it to the corresponding normal or hidden
+  ability slot on the evolved component.
+- Evolution never lets KIF's temporary post-evolution ability-index remap
+  overwrite a still-legal component ability.
 
 ABILITIES
 ---------
@@ -321,7 +234,7 @@ Ability Ball
 
 BLACKLIST
 ---------
-Only combinations that are technically unsafe or produce extreme multiplicative
+Only combinations that are technically unsafe, overpowered or produce extreme multiplicative
 behavior are hard-blacklisted.
 
 Illusion + Imposter

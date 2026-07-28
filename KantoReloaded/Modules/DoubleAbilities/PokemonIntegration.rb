@@ -337,6 +337,10 @@ module KantoReloaded
             pokemon = instance_variable_get(:@pokemon)
             previous_components =
               KantoReloaded::DoubleAbilities.component_snapshot(pokemon)
+            previous_pair = [
+              KantoReloaded::DoubleAbilities.primary_id(pokemon),
+              KantoReloaded::DoubleAbilities.secondary_id(pokemon)
+            ]
             result = hook.call
             if reversing
               KantoReloaded::DoubleAbilities.initialize_generated!(
@@ -346,7 +350,8 @@ module KantoReloaded
             else
               KantoReloaded::DoubleAbilities.reconcile_evolution!(
                 pokemon,
-                previous_components
+                previous_components,
+                previous_pair
               )
             end
             result
@@ -370,16 +375,25 @@ module KantoReloaded
     end
 
     module BattleRuntime
+      ELIGIBILITY_IVAR = :@kr_double_abilities_eligible
+      CONFIG_VERSION_IVAR = :@kr_double_abilities_config_version
+      SECONDARY_CACHE_IVAR = :@kr_double_abilities_secondary_cache
+      PAIR_PRIMARY_IVAR = :@kr_double_abilities_pair_primary
+      PAIR_SECONDARY_IVAR = :@kr_double_abilities_pair_secondary
+      PAIR_VALID_IVAR = :@kr_double_abilities_pair_valid
+
       @last_ability_owner = nil
 
       class << self
         def sync_battler(battler, pokemon)
           clear_runtime_state(battler)
-          if eligible_pokemon?(pokemon)
+          refresh_eligibility_cache(battler, pokemon)
+          if eligible_battler?(battler)
             battler.instance_variable_set(
               :@ability2_id,
               KantoReloaded::DoubleAbilities.secondary_id(pokemon)
             )
+            clear_secondary_cache(battler)
             validate_battle_pair(battler)
           end
           if limited_wonder_guard?(battler)
@@ -400,7 +414,13 @@ module KantoReloaded
             :@kr_triggering_ability_slot,
             :@kr_wonder_guard_charges,
             :@kr_wonder_guard_exhausted,
-            :@kr_wonder_guard_last_charge_key
+            :@kr_wonder_guard_last_charge_key,
+            ELIGIBILITY_IVAR,
+            CONFIG_VERSION_IVAR,
+            SECONDARY_CACHE_IVAR,
+            PAIR_PRIMARY_IVAR,
+            PAIR_SECONDARY_IVAR,
+            PAIR_VALID_IVAR
           ].each { |key| battler.instance_variable_set(key, nil) }
           clear_pending_splash(battler)
         end
@@ -412,15 +432,12 @@ module KantoReloaded
 
         def eligible_battler?(battler)
           return false unless battler
-          pokemon = battler.respond_to?(:pokemon) ? battler.pokemon : nil
-          transformed = battler.instance_variable_get(:@kr_double_abilities_transformed)
-          unless transformed
-            return false unless eligible_pokemon?(pokemon)
-          else
-            return false unless KantoReloaded::DoubleAbilities.enabled?
-            return false if KantoReloaded::DoubleAbilities.family_pokemon?(pokemon)
-            return false unless KantoReloaded::DoubleAbilities.multiplayer_compatible?
+          version = KantoReloaded::DoubleAbilities.runtime_config_version
+          cached_version = battler.instance_variable_get(CONFIG_VERSION_IVAR)
+          if cached_version != version
+            refresh_eligibility_cache(battler)
           end
+          return false unless battler.instance_variable_get(ELIGIBILITY_IVAR)
           !battler.instance_variable_get(:@kr_double_abilities_disabled)
         rescue
           false
@@ -429,8 +446,14 @@ module KantoReloaded
         def secondary_id(battler)
           return nil unless eligible_battler?(battler)
           value = battler.instance_variable_get(:@ability2_id)
+          cached = battler.instance_variable_get(SECONDARY_CACHE_IVAR)
+          return cached[1] if cached && cached[0] == value
           ability = GameData::Ability.try_get(value)
-          ability ? ability.id : nil
+          resolved = ability ? ability.id : nil
+          battler.instance_variable_set(
+            SECONDARY_CACHE_IVAR, [value, resolved]
+          )
+          resolved
         rescue
           nil
         end
@@ -488,6 +511,8 @@ module KantoReloaded
           return false unless KantoReloaded::DoubleAbilities.pair_legal?(first, second)
           key = slot.to_i == 2 ? :@ability2_id : :@ability_id
           battler.instance_variable_set(key, data.id)
+          clear_secondary_cache(battler) if slot.to_i == 2
+          cache_pair_validation(battler, first, second, true)
           true
         rescue
           false
@@ -512,7 +537,15 @@ module KantoReloaded
         def validate_battle_pair(battler)
           first = battler.instance_variable_get(:@ability_id)
           second = battler.instance_variable_get(:@ability2_id)
-          return true if KantoReloaded::DoubleAbilities.pair_legal?(first, second)
+          cached_valid = battler.instance_variable_get(PAIR_VALID_IVAR)
+          if !cached_valid.nil? &&
+             battler.instance_variable_get(PAIR_PRIMARY_IVAR) == first &&
+             battler.instance_variable_get(PAIR_SECONDARY_IVAR) == second
+            return cached_valid
+          end
+          valid = KantoReloaded::DoubleAbilities.pair_legal?(first, second)
+          cache_pair_validation(battler, first, second, valid)
+          return true if valid
           battler.instance_variable_set(:@kr_double_abilities_disabled, true)
           if defined?(KantoReloaded::Log)
             KantoReloaded::Log.warning_once(
@@ -524,6 +557,55 @@ module KantoReloaded
           false
         rescue
           false
+        end
+
+        def invalidate_battler_cache(battler)
+          return false unless battler
+          [
+            ELIGIBILITY_IVAR,
+            CONFIG_VERSION_IVAR,
+            SECONDARY_CACHE_IVAR,
+            PAIR_PRIMARY_IVAR,
+            PAIR_SECONDARY_IVAR,
+            PAIR_VALID_IVAR
+          ].each { |key| battler.instance_variable_set(key, nil) }
+          true
+        rescue
+          false
+        end
+
+        def refresh_eligibility_cache(battler, pokemon = nil)
+          return false unless battler
+          pokemon ||= battler.respond_to?(:pokemon) ? battler.pokemon : nil
+          transformed = battler.instance_variable_get(
+            :@kr_double_abilities_transformed
+          )
+          eligible = if transformed
+                       KantoReloaded::DoubleAbilities.enabled? &&
+                         !KantoReloaded::DoubleAbilities.family_pokemon?(pokemon) &&
+                         KantoReloaded::DoubleAbilities.multiplayer_compatible?
+                     else
+                       eligible_pokemon?(pokemon)
+                     end
+          battler.instance_variable_set(ELIGIBILITY_IVAR, !!eligible)
+          battler.instance_variable_set(
+            CONFIG_VERSION_IVAR,
+            KantoReloaded::DoubleAbilities.runtime_config_version
+          )
+          !!eligible
+        rescue
+          battler.instance_variable_set(ELIGIBILITY_IVAR, false) if battler
+          false
+        end
+
+        def clear_secondary_cache(battler)
+          battler.instance_variable_set(SECONDARY_CACHE_IVAR, nil)
+        end
+
+        def cache_pair_validation(battler, first, second, valid)
+          battler.instance_variable_set(PAIR_PRIMARY_IVAR, first)
+          battler.instance_variable_set(PAIR_SECONDARY_IVAR, second)
+          battler.instance_variable_set(PAIR_VALID_IVAR, !!valid)
         end
 
         def capture_ability_owner(battler, ability)

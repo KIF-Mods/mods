@@ -1,7 +1,8 @@
 # Reloaded Shop
 
 Kanto Reloaded replaces KIF's Kuray Shop purchase screen with the offline
-`RLD Shop`. It does not modify ordinary NPC Marts.
+`RLD Shop`. Ordinary NPC Marts keep their native screens and transaction
+behavior; KR only extends their successful bulk-purchase rewards.
 
 ## Stock ownership
 
@@ -35,10 +36,18 @@ panels as Hoenn Reloaded. The shared Mart picker also exposes the matching
 green sale-total presentation for any future Reloaded Mart sell flow; the KIF
 Kuray Shop integration itself remains buy-only.
 
-Bulk purchases award one bonus item for every complete group of ten:
+Bulk purchases in both RLD Shop and ordinary NPC Marts award one bonus item
+for every complete group of ten in the current transaction:
 
 - every 10 Poke Balls award 1 Premier Ball
 - every 10 DNA Splicers award 1 DNA Reverser
+- every 10 Super Potions, Hyper Potions, or Max Potions award 1 Potion
+
+Eligible Reloaded Shop quantity and confirmation panels preview the reward for
+the selected quantity. Ordinary NPC Marts add the same preview to their native
+purchase confirmation. A KR purchase-reward popup then reports the number of
+bonus items added. If the Bag cannot hold the full reward, the popup reports
+the partial or failed award.
 
 Open the catalog editor from **Quality of Life > Reloaded Shop**. The editor
 uses Left/Right to change panels and Action to add a category or item.
@@ -61,5 +70,11 @@ Runtime integration uses guarded KR hooks:
   `RLD Shop`.
 - `PokemonMartScreen#pbBuyScreen` redirects only while KIF marks
   `$game_temp.fromkurayshop`.
+- Standard Mart hooks track the selected item and quantity, then award bonuses
+  only after `PokemonMartAdapter#setMoney` confirms a successful purchase.
+- KIF's original single Premier Ball bonus is suppressed only after KR has
+  awarded the complete per-10 reward.
 
-All other Mart calls delegate to the original implementation.
+Every wrapped Mart method delegates to its original implementation. KR does
+not replace the native buy loop, quantity picker, item storage, or payment
+logic.

@@ -93,6 +93,9 @@ module KantoReloaded
           lines << "#{level.to_s.upcase}: #{count}"
         end
         lines << ""
+        lines << "[ERROR LOG]"
+        lines.concat(log_snapshot[:errors])
+        lines << ""
         lines << "[RECENT LOG]"
         lines.concat(log_snapshot[:recent])
         lines << "[/BUG REPORT]"
@@ -253,19 +256,32 @@ module KantoReloaded
         ["Could not read KR state: #{sanitize(e.class)}"]
       end
 
-      def bug_report_log_snapshot
+      def bug_report_log_snapshot(paths = [PREVIOUS_LOG, MAIN_LOG])
         counts = {}
         LEVELS.each { |level| counts[level] = 0 }
         recent_ring = Array.new(BUG_REPORT_LOG_LIMIT)
+        error_lines = []
         line_count = 0
-        [PREVIOUS_LOG, MAIN_LOG].each do |path|
+        paths.each do |path|
           next unless File.file?(path)
+          current_error = nil
           File.foreach(path) do |line|
             level_name = line[/\[(DEBUG|INFO|WARNING|ERROR|CRITICAL|FATAL)\]/, 1]
-            counts[level_name.downcase.to_sym] += 1 if level_name
-            recent_ring[line_count % BUG_REPORT_LOG_LIMIT] = sanitize(line.to_s.rstrip)
+            sanitized_line = sanitize(line.to_s.rstrip)
+            if level_name
+              error_lines.concat(current_error) if current_error
+              level = level_name.downcase.to_sym
+              counts[level] += 1
+              current_error = if [:error, :critical, :fatal].include?(level)
+                                [sanitized_line]
+                              end
+            elsif current_error
+              current_error << sanitized_line
+            end
+            recent_ring[line_count % BUG_REPORT_LOG_LIMIT] = sanitized_line
             line_count += 1
           end
+          error_lines.concat(current_error) if current_error
         end
         recent = if line_count <= BUG_REPORT_LOG_LIMIT
                    recent_ring.first(line_count)
@@ -274,10 +290,14 @@ module KantoReloaded
                    recent_ring[start..-1] + recent_ring[0...start]
                  end
         recent = ["Log.txt is empty."] if recent.empty?
-        { :counts => counts, :recent => recent }
+        if error_lines.empty?
+          error_lines = ["No error, critical, or fatal log entries found."]
+        end
+        { :counts => counts, :errors => error_lines, :recent => recent }
       rescue StandardError => e
         {
           :counts => counts || {},
+          :errors => ["Could not read error log entries: #{sanitize(e.class)}"],
           :recent => ["Could not read Log.txt: #{sanitize(e.class)}"]
         }
       end

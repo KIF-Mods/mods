@@ -420,7 +420,8 @@ module KantoReloaded
                               },
                               :preview_color => proc { |total, _quantity|
                                 total.to_i <= 0 ? GREEN : RED
-                              }
+                              },
+                              :notice => bulk_purchase_notice(entry)
                             )
                           end
         return unless quantity_to_buy && quantity_to_buy > 0
@@ -444,6 +445,7 @@ module KantoReloaded
             :preview_color => proc { |amount, _value|
               amount.to_i <= 0 ? GREEN : RED
             },
+            :notice => bulk_purchase_notice(entry),
             :default => true
           )
           return unless confirmed
@@ -474,25 +476,30 @@ module KantoReloaded
       end
 
       def award_bulk_purchase_bonus(entry, bought)
-        data = GameData::Item.try_get(entry[:id]) rescue nil
-        bonus_count = bought.to_i / 10
-        return 0 unless data && bonus_count > 0
-        bonus_id = if data.is_poke_ball?
-                     :PREMIERBALL
-                   elsif data.id == :DNASPLICERS
-                     :DNAREVERSER
-                   end
-        return 0 unless bonus_id
-        bonus = GameData::Item.try_get(bonus_id) rescue nil
-        return 0 unless bonus
-        awarded = 0
-        bonus_count.times do
-          break unless @adapter.addItem(bonus.id)
-          awarded += 1
-        end
-        awarded
+        return 0 unless defined?(KantoReloaded::BulkPurchaseRewards)
+        reward = KantoReloaded::BulkPurchaseRewards.award(
+          @adapter, entry[:id], bought
+        )
+        KantoReloaded::BulkPurchaseRewards.show_reward(reward)
+        reward ? reward[:awarded].to_i : 0
       rescue StandardError
         0
+      end
+
+      def bulk_purchase_notice(entry)
+        return nil unless defined?(KantoReloaded::BulkPurchaseRewards)
+        item = entry && entry[:id]
+        return nil unless KantoReloaded::BulkPurchaseRewards.rewardable?(item)
+        proc do |quantity|
+          {
+            :text => KantoReloaded::BulkPurchaseRewards.preview(
+              item, quantity
+            ),
+            :color => quantity.to_i >= 10 ? GREEN : GRAY
+          }
+        end
+      rescue StandardError
+        nil
       end
 
       def max_quantity(entry)

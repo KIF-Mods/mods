@@ -17,7 +17,12 @@ module KantoReloaded
 
     class << self
       def file
-        outcome = run_export
+        outcome = run_export(
+          nil,
+          :title => _INTL("Exporting Bug Report"),
+          :initial_message => _INTL("Preparing bug report..."),
+          :cancel_prompt => _INTL("Cancel the bug report export?")
+        )
         return false unless outcome
         if outcome[:cancelled]
           KantoReloaded.toast_warning(_INTL("Bug report export cancelled."))
@@ -29,6 +34,42 @@ module KantoReloaded
         log_exception("File bug report failed", e)
         KantoReloaded.message(
           _INTL("Could not file the bug report.\n{1}", sanitized_error(e)),
+          :theme => :error
+        )
+        false
+      end
+
+      def publish_generated(options = {}, &builder)
+        raise ArgumentError, "A report builder is required." unless builder
+        config = {
+          :display_name => _INTL("report"),
+          :link_label => "Report",
+          :title => _INTL("Exporting Report"),
+          :initial_message => _INTL("Preparing report..."),
+          :cancel_prompt => _INTL("Cancel the report export?"),
+          :open_discord => true
+        }.merge(options || {})
+        worker = proc do |callback|
+          perform_generated_export(config, builder, callback)
+        end
+        outcome = run_export(worker, config)
+        return false unless outcome
+        if outcome[:cancelled]
+          KantoReloaded.toast_warning(
+            _INTL("{1} export cancelled.", display_name(config))
+          )
+          return false
+        end
+        return handle_generated_failure(outcome, config) unless outcome[:success]
+        handle_generated_success(outcome, config)
+      rescue StandardError => e
+        log_exception("Generated report publish failed", e)
+        KantoReloaded.message(
+          _INTL(
+            "Could not publish the {1}.\n{2}",
+            display_name(options || {}),
+            sanitized_error(e)
+          ),
           :theme => :error
         )
         false
@@ -54,32 +95,62 @@ module KantoReloaded
 
       private
 
-      def run_export
+      def run_export(worker = nil, progress_options = {})
+        worker ||= proc { |callback| perform_export(&callback) }
         if progress_ui_available? && defined?(Thread)
           return KantoReloaded::UI::Modal.with_modal do
-            ExportProgressScene.new(proc { |callback| perform_export(&callback) }).main
+            ExportProgressScene.new(worker, progress_options).main
           end
         end
-        perform_export
+        worker.call(nil)
       ensure
         KantoReloaded::UI::Modal.drain_input if defined?(KantoReloaded::UI::Modal)
       end
 
       def perform_export
         report_path = nil
+        report_url = nil
+        log_path = nil
         yield(_INTL("Creating sanitized report...")) if block_given?
         report_path = KantoReloaded::Log.export_bug_report
-        raise "LatestBugReport.txt could not be created." unless report_path && File.file?(report_path)
-        raise "LatestBugReport.txt is empty." if File.size(report_path).to_i <= 0
-        raise "LatestBugReport.txt is too large to upload." if File.size(report_path).to_i > MAX_REPORT_BYTES
+        validate_report_file(report_path, "LatestBugReport.txt")
         text = File.open(report_path, "rb") { |file| file.read }
-        raise "LatestBugReport.txt is not a text file." if text.include?("\0")
         yield(_INTL("Uploading sanitized report...")) if block_given?
-        url = upload_to_paste(text)
+        report_url = upload_to_paste(text)
+        log_path = KantoReloaded::Log::MAIN_LOG
+        validate_report_file(log_path, "Log.txt")
+        log_text = File.open(log_path, "rb") { |file| file.read }
+        yield(_INTL("Uploading sanitized full log...")) if block_given?
+        log_url = upload_to_paste(log_text)
         {
           :success => true,
           :path => report_path,
-          :url => url
+          :log_path => log_path,
+          :url => report_url,
+          :log_url => log_url
+        }
+      rescue StandardError => e
+        {
+          :success => false,
+          :path => report_path,
+          :log_path => log_path,
+          :url => report_url,
+          :error => e
+        }
+      end
+
+      def perform_generated_export(config, builder, callback = nil)
+        report_path = nil
+        name = display_name(config)
+        callback.call(_INTL("Creating sanitized {1}...", name)) if callback
+        report_path = builder.call
+        validate_report_file(report_path, name)
+        text = File.open(report_path, "rb") { |file| file.read }
+        callback.call(_INTL("Uploading sanitized {1}...", name)) if callback
+        {
+          :success => true,
+          :path => report_path,
+          :url => upload_to_paste(text)
         }
       rescue StandardError => e
         {
@@ -87,6 +158,15 @@ module KantoReloaded
           :path => report_path,
           :error => e
         }
+      end
+
+      def validate_report_file(path, name)
+        raise "#{name} could not be created." unless path && File.file?(path)
+        raise "#{name} is empty." if File.size(path).to_i <= 0
+        raise "#{name} is too large to upload." if File.size(path).to_i > MAX_REPORT_BYTES
+        text = File.open(path, "rb") { |file| file.read }
+        raise "#{name} is not a text file." if text.include?("\0")
+        true
       end
 
       def upload_to_paste(text)
@@ -138,24 +218,35 @@ module KantoReloaded
 
       def handle_success(outcome)
         url = outcome[:url].to_s
-        link = joiplay? ? url : "[Bug Report](#{url})"
-        copied = platform_clipboard_write(link)
+        log_url = outcome[:log_url].to_s
+        links = if joiplay?
+                  _INTL("Bug Report: {1}\nFull Log: {2}", url, log_url)
+                else
+                  "[Bug Report](#{url})\n[Full Log](#{log_url})"
+                end
+        copied = platform_clipboard_write(links)
         opened = platform_open_url(BUG_REPORT_THREAD_URL)
         if copied && opened
           KantoReloaded.toast_success(
-            _INTL("Bug report link copied. Discord thread opened.")
+            _INTL("Bug report and log links copied. Discord thread opened.")
           )
         elsif copied
           KantoReloaded.toast_warning(
-            _INTL("Bug report link copied, but Discord could not be opened.")
+            _INTL("Bug report and log links copied, but Discord could not be opened.")
           )
         elsif opened
           KantoReloaded.toast_warning(
-            _INTL("Discord opened, but the bug report link could not be copied.\n{1}", url)
+            _INTL(
+              "Discord opened, but the report links could not be copied.\n{1}",
+              links
+            )
           )
         else
           KantoReloaded.message(
-            _INTL("Bug report uploaded, but clipboard and Discord are unavailable.\n{1}", url),
+            _INTL(
+              "Bug report and log uploaded, but clipboard and Discord are unavailable.\n{1}",
+              links
+            ),
             :theme => :warning
           )
         end
@@ -165,6 +256,18 @@ module KantoReloaded
       def handle_failure(outcome)
         error = outcome[:error]
         path = outcome[:path]
+        report_url = outcome[:url].to_s
+        unless report_url.empty?
+          KantoReloaded.message(
+            _INTL(
+              "LatestBugReport.txt was uploaded, but Log.txt could not be uploaded.\n{1}\n{2}",
+              report_url,
+              sanitized_error(error)
+            ),
+            :theme => :warning
+          )
+          return false
+        end
         if path && File.file?(path)
           KantoReloaded.message(
             _INTL(
@@ -181,6 +284,75 @@ module KantoReloaded
           )
         end
         false
+      end
+
+      def handle_generated_success(outcome, config)
+        url = outcome[:url].to_s
+        link = joiplay? ? url : "[#{config[:link_label]}](#{url})"
+        copied = platform_clipboard_write(link)
+        open_requested = !!config[:open_discord]
+        opened = open_requested && platform_open_url(BUG_REPORT_THREAD_URL)
+        name = display_name(config)
+        if copied && opened
+          KantoReloaded.toast_success(
+            _INTL("{1} link copied. Discord thread opened.", name)
+          )
+        elsif copied && !open_requested
+          KantoReloaded.toast_success(
+            _INTL("{1} link copied.", name)
+          )
+        elsif copied
+          KantoReloaded.toast_warning(
+            _INTL("{1} link copied, but Discord could not be opened.", name)
+          )
+        elsif opened
+          KantoReloaded.toast_warning(
+            _INTL("Discord opened, but the {1} link could not be copied.\n{2}", name, url)
+          )
+        else
+          KantoReloaded.message(
+            open_requested ?
+              _INTL(
+                "{1} uploaded, but clipboard and Discord are unavailable.\n{2}",
+                name, url
+              ) :
+              _INTL(
+                "{1} uploaded, but the clipboard is unavailable.\n{2}",
+                name, url
+              ),
+            :theme => :warning
+          )
+        end
+        true
+      end
+
+      def handle_generated_failure(outcome, config)
+        error = outcome[:error]
+        path = outcome[:path]
+        name = display_name(config)
+        if path && File.file?(path)
+          KantoReloaded.message(
+            _INTL(
+              "{1} was created, but it could not be uploaded.\n{2}\n{3}",
+              name, display_path(path), sanitized_error(error)
+            ),
+            :theme => :warning
+          )
+        else
+          KantoReloaded.message(
+            _INTL("Could not create the {1}.\n{2}", name, sanitized_error(error)),
+            :theme => :error
+          )
+        end
+        false
+      end
+
+      def display_name(config)
+        value = config.is_a?(Hash) ? config[:display_name] : nil
+        value = _INTL("report") if value.nil? || value.to_s.empty?
+        value.to_s
+      rescue
+        "report"
       end
 
       def platform_clipboard_write(text)
@@ -239,9 +411,15 @@ module KantoReloaded
       WIDTH = 320
       HEIGHT = 112
 
-      def initialize(worker)
+      def initialize(worker, options = {})
         @worker = worker
-        @state = { :message => _INTL("Preparing bug report...") }
+        @title = options[:title] || _INTL("Exporting Bug Report")
+        @cancel_prompt = options[:cancel_prompt] ||
+                         _INTL("Cancel the bug report export?")
+        @state = {
+          :message => options[:initial_message] ||
+                      _INTL("Preparing bug report...")
+        }
         @cancelled = false
       end
 
@@ -300,7 +478,7 @@ module KantoReloaded
           return @state[:outcome] if @state[:finished]
           if KantoReloaded::UI::InputRouter.input_triggered?(:BACK)
             if KantoReloaded.confirm(
-              _INTL("Cancel the bug report export?"),
+              @cancel_prompt,
               :default => false,
               :z => @viewport.z + 10
             )
@@ -326,7 +504,7 @@ module KantoReloaded
                           popup::PANEL_RADIUS - 1, theme[:background])
         draw.plain_text(
           bitmap, 14, 6, WIDTH - 28, 24,
-          _INTL("Exporting Bug Report"), theme[:title], 1
+          @title, theme[:title], 1
         )
         draw.plain_text(
           bitmap, 14, 36, WIDTH - 28, 22,

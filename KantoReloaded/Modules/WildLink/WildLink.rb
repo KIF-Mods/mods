@@ -84,7 +84,7 @@ module KantoReloaded
         })
         KantoReloaded::Settings.register(MESSAGES_SETTING, {
           :name => "Messages",
-          :description => "Show Wild Link prompts, warnings, and notifications.",
+          :description => "Show optional Wild Link prompts, warnings, and notifications.",
           :type => :toggle,
           :default => 1,
           :category => :gameplay,

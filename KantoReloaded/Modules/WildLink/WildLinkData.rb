@@ -58,17 +58,14 @@ module KantoReloaded
           MODULE_ID, STATE_KEY, {}, section: :modules
         )
         stored = {} unless stored.is_a?(Hash)
-        stored["version"] = 2
+        stored["version"] = 3
         stored["search_levels"] = {} unless stored["search_levels"].is_a?(Hash)
-        unless stored["discovered_fusions"].is_a?(Hash)
-          stored["discovered_fusions"] = {}
-        end
+        stored.delete("discovered_fusions")
         stored
       rescue StandardError
         @fallback_state ||= {
-          "version" => 2,
-          "search_levels" => {},
-          "discovered_fusions" => {}
+          "version" => 3,
+          "search_levels" => {}
         }
       end
 
@@ -112,62 +109,6 @@ module KantoReloaded
         data = state
         data["search_levels"] = {}
         save_state(data)
-      end
-
-      def record_discovered_fusion(species, method_id, level,
-                                   map_id = current_map_id)
-        return false unless method_id && map_id.to_i > 0
-        species_data = GameData::Species.get(species)
-        return false unless species_data.respond_to?(:is_fusion) &&
-                            species_data.is_fusion
-        data = state
-        bucket_key = discovered_fusion_bucket_key(method_id, map_id)
-        buckets = data["discovered_fusions"]
-        buckets[bucket_key] = {} unless buckets[bucket_key].is_a?(Hash)
-        key = species_key(species_data.id)
-        observed = [level.to_i, 1].max
-        record = buckets[bucket_key][key]
-        record = {} unless record.is_a?(Hash)
-        minimum = record["min_level"].to_i
-        maximum = record["max_level"].to_i
-        record["min_level"] = minimum > 0 ? [minimum, observed].min : observed
-        record["max_level"] = maximum > 0 ? [maximum, observed].max : observed
-        buckets[bucket_key][key] = record
-        save_state(data)
-      rescue StandardError => e
-        log_exception("Wild Link fusion discovery save failed", e)
-        false
-      end
-
-      def discovered_fusions(method_id, map_id = current_map_id)
-        bucket_key = discovered_fusion_bucket_key(method_id, map_id)
-        bucket = state["discovered_fusions"][bucket_key]
-        return [] unless bucket.is_a?(Hash)
-        rows = []
-        bucket.each do |species, record|
-          begin
-            species_data = GameData::Species.get(species)
-            next unless species_data.respond_to?(:is_fusion) &&
-                        species_data.is_fusion
-            details = record.is_a?(Hash) ? record : {}
-            minimum = [details["min_level"].to_i, 1].max
-            maximum = [details["max_level"].to_i, minimum].max
-            rows << {
-              :species => species_data.id,
-              :min_level => minimum,
-              :max_level => maximum
-            }
-          rescue StandardError
-            next
-          end
-        end
-        rows
-      rescue StandardError
-        []
-      end
-
-      def discovered_fusion_bucket_key(method_id, map_id = current_map_id)
-        [map_id.to_i, method_id.to_s].join("|")
       end
 
       def chain_key(species, method_id, map_id = current_map_id)
@@ -216,8 +157,10 @@ module KantoReloaded
       end
 
       def message(text, options = {})
-        return false unless messages_enabled?
-        KantoReloaded::PopupWindow.message(text, options)
+        popup_options = options.dup
+        force = !!popup_options.delete(:force)
+        return false unless force || messages_enabled?
+        KantoReloaded::PopupWindow.message(text, popup_options)
       end
 
       def confirm(text, options = {})

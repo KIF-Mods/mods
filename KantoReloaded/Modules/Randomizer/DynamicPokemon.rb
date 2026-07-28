@@ -17,6 +17,7 @@ module KantoReloaded
         end
 
         def transform_encounter(encounter)
+          return encounter if suppressed?
           return encounter unless KantoReloaded::Randomizer.dynamic_pokemon?
           return encounter unless encounter.is_a?(Array) && encounter.length >= 2
           result = encounter.dup
@@ -28,6 +29,7 @@ module KantoReloaded
         end
 
         def transform_species(species)
+          return species if suppressed?
           return species unless KantoReloaded::Randomizer.dynamic_pokemon?
           select_species(species)
         rescue StandardError => e
@@ -36,6 +38,7 @@ module KantoReloaded
         end
 
         def transform_gift(pokemon, source_species, dont_randomize, result)
+          return result if suppressed?
           return result unless dynamic_gift?(pokemon, dont_randomize)
           replacement = transform_species(source_species)
           finalize_abilities!(pokemon) if apply_species!(pokemon, replacement)
@@ -46,11 +49,23 @@ module KantoReloaded
         end
 
         def transform_static(species, result)
+          return result if suppressed?
           return result unless dynamic_static?(species)
           transform_species(species)
         rescue StandardError => e
           log_exception("Dynamic static encounter failed", e)
           result
+        end
+
+        def without_dynamic_randomization
+          @suppression_depth = @suppression_depth.to_i + 1
+          yield
+        ensure
+          @suppression_depth = [@suppression_depth.to_i - 1, 0].max
+        end
+
+        def suppressed?
+          @suppression_depth.to_i > 0
         end
 
         private

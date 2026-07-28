@@ -1,5 +1,68 @@
 ══════════════════════════════════════════════
 KANTO RELOADED
+Update #3 - Signals & Supplies
+v1.3.1
+Release Date: July 27, 2026
+══════════════════════════════════════════════
+
+SUMMARY
+-------
+This update strengthens Wild Link with more accurate randomized rosters, safer field targets, clearer progression details, and faster previews while expanding Mart bulk-purchase rewards and reducing Double Abilities battle overhead.
+
+FEATURES
+--------
+• Added deterministic Rare Signal species targeting roughly 50 BST above the route average on maps without authored Poké Radar encounters
+
+IMPROVEMENTS
+------------
+• File A Bug Report now uploads and copies separate links for both the sanitized bug report and full current log
+
+BALANCE
+-------
+• Added one Potion per 10 Super Potions, Hyper Potions, or Max Potions purchased in a single transaction
+
+BUG FIXES
+---------
+• Fixed chance-based and forced wild fusions being persisted in Wild Link rosters instead of showing only fusions supplied by randomized encounter tables
+• Fixed Wild Link Surf searches selecting bridge tiles, placing overworld Pokemon on land, and launching battles from map updates in a way that could cause white-screen crashes
+• Fixed Dynamic Pokemon encounters expanding Wild Link's persistent searchable roster
+• Fixed Wild Link omitting KIF's final Static Encounter mapping from randomized table, Rare Signal, and generic Rock Smash fallback species
+• Fixed Wild Link showing authored encounter species instead of KIF's effective Global or Area randomized encounter roster
+• Expanded per-10 Premier Ball and DNA Reverser purchase rewards to regular marts
+• Fixed bug reports omitting errors that had fallen outside the newest 300 log lines
+• Fixed Wild Link hiding valid Surf encounter tables until the player was already surfing
+• Fixed Wild Link omitting KIF's generic Geodude fallback on maps with smash rocks but no authored Rock Smash table
+• Fixed Wild Link placement failures being hidden when Messages was Off
+• Fixed fusion component evolution replacing still-legal Double Abilities with KIF's post-evolution ability-index result
+• Fixed active Wild Link Rock Smash indicators remaining owned by the previous map spriteset and crashing during map transfers
+• Fixed Wild Link combining Morning, Day, and Night species instead of showing KIF's currently active time-based encounter table
+
+VISUALS & UI
+------------
+• Added live bulk-purchase reward previews to Reloaded Shop and standard Mart purchase confirmations
+• Added per-method Seen and Caught completion counters to the Wild Link header
+• Added KR purchase-reward prompts showing how many bonus items were added in Reloaded Shop and regular marts
+• Added Input Z switching between Wild Link Search Level information and Current Bonuses for inactive links and active targets
+• Replaced Wild Link's ambiguous Potential label with the generated target's exact perfect-IV count
+• Highlighted unresolved Wild Link Rare Signals and revealed rare-species roster rows in gold
+• Replaced missing Wild Link overworld graphics with Pikachu while preserving fully black silhouettes for unknown targets
+
+PERFORMANCE
+-----------
+• Reduced Wild Link roster redraw work by caching row display data and moving cursor pulsing onto a dedicated sprite layer
+• Cached stable Double Abilities battler eligibility, secondary ability resolution, and legal-pair validation instead of repeating species-data work across battle handlers
+
+TECHNICAL
+---------
+• Added scoped Dynamic Pokemon suppression so Wild Link can resolve stable native randomizer mappings without consuming a Dynamic encounter roll
+
+DEVELOPER
+---------
+• Added a Wild Link Gather Map Data diagnostic exporter for current-map metadata, terrain, field events, eligibility, and encounter tables
+
+
+══════════════════════════════════════════════
+KANTO RELOADED
 Update #2 - Wild Link & Double Abilities
 v1.3.0
 Release Date: July 26, 2026

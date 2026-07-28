@@ -5,6 +5,357 @@
 module KantoReloaded
   module WildLink
     module UI
+      module PreviewCache
+        DESKTOP_LIMIT = 128
+        JOIPLAY_LIMIT = 64
+        class Entry
+          attr_reader :frame_width
+          attr_reader :frame_height
+          attr_reader :frame_count
+          attr_reader :offset_x
+          attr_reader :offset_y
+
+          def initialize(animated_bitmap, frame_width, frame_height,
+                         frame_count, offset_x, offset_y)
+            @animated_bitmap = animated_bitmap
+            @frame_width = frame_width
+            @frame_height = frame_height
+            @frame_count = frame_count
+            @offset_x = offset_x
+            @offset_y = offset_y
+            @references = 0
+            @evicted = false
+          end
+
+          def bitmap
+            @animated_bitmap && @animated_bitmap.bitmap
+          end
+
+          def update
+            @animated_bitmap.update if @animated_bitmap
+          end
+
+          def acquire
+            @references += 1
+            self
+          end
+
+          def release
+            @references -= 1 if @references > 0
+            dispose if @evicted && @references <= 0
+          end
+
+          def evict
+            @evicted = true
+            dispose if @references <= 0
+          end
+
+          def disposed?
+            !@animated_bitmap || @animated_bitmap.disposed?
+          rescue StandardError
+            true
+          end
+
+          def dispose
+            return if disposed?
+            @animated_bitmap.dispose
+            @animated_bitmap = nil
+          rescue StandardError
+            @animated_bitmap = nil
+          end
+        end
+
+        class << self
+          def fetch(species, context_signature)
+            @entries ||= {}
+            @order ||= []
+            key = [WildLink.species_key(species), context_signature]
+            entry = @entries[key]
+            if entry && !entry.disposed?
+              touch(key)
+              return entry
+            end
+            @entries.delete(key)
+            @order.delete(key)
+            preview = preview_pokemon(species)
+            entry = build_entry(species, preview)
+            return nil unless entry
+            @entries[key] = entry
+            touch(key)
+            trim
+            entry
+          end
+
+          def context_signature
+            system = defined?($PokemonSystem) ? $PokemonSystem : nil
+            variables = defined?($game_variables) ? $game_variables : nil
+            global = defined?($PokemonGlobal) ? $PokemonGlobal : nil
+            substitutions = if global &&
+                               global.respond_to?(:alt_sprite_substitutions)
+                              global.alt_sprite_substitutions
+                            end
+            [
+              system && system.respond_to?(:kuraybigicons) ?
+                system.kuraybigicons.to_i : 0,
+              system && system.respond_to?(:kurayindividcustomsprite) ?
+                system.kurayindividcustomsprite.to_i : 0,
+              system && system.respond_to?(:shiny_icons_kuray) ?
+                system.shiny_icons_kuray.to_i : 0,
+              variables && defined?(VAR_FUSION_ICON_STYLE) ?
+                variables[VAR_FUSION_ICON_STYLE].to_i : 0,
+              substitution_signature(substitutions)
+            ]
+          rescue StandardError
+            [0, 0, 0, 0, ""]
+          end
+
+          def clear
+            (@entries || {}).each_value(&:evict)
+            @entries = {}
+            @order = []
+          rescue StandardError
+            @entries = {}
+            @order = []
+          end
+
+          private
+
+          def preview_pokemon(species)
+            owner = defined?($Trainer) ? $Trainer : nil
+            preview = Pokemon.new(species, 5, owner, false)
+            preview.personalID = deterministic_personal_id(species) if
+              preview.respond_to?(:personalID=)
+            preview.shiny = false if preview.respond_to?(:shiny=)
+            preview.calc_stats if preview.respond_to?(:calc_stats)
+            preview
+          end
+
+          def build_entry(species, preview = nil)
+            preview ||= preview_pokemon(species)
+            composite = build_composite_fusion_entry(preview)
+            return composite if composite
+            icon = PokemonIconSprite.new(preview)
+            icon.x = 0
+            icon.y = 0
+            wrapped = icon.instance_variable_get(:@sprite)
+            animated = icon.instance_variable_get(:@animBitmap)
+            return nil unless animated && animated.bitmap
+            frame_width = [icon.src_rect.width.to_i, 1].max
+            frame_height = [icon.src_rect.height.to_i, 1].max
+            frame_count = [animated.bitmap.width / frame_width, 1].max
+            offset_x = wrapped ? wrapped.x.to_i : 0
+            offset_y = wrapped ? wrapped.y.to_i : 0
+            icon.instance_variable_set(:@animBitmap, nil)
+            icon.bitmap = nil
+            icon.dispose
+            icon = nil
+            Entry.new(
+              animated, frame_width, frame_height, frame_count,
+              offset_x, offset_y
+            )
+          rescue StandardError => e
+            WildLink.log_exception("Wild Link preview loading failed", e)
+            nil
+          ensure
+            icon.dispose if icon && !icon.disposed?
+          end
+
+          def build_composite_fusion_entry(preview)
+            return nil if big_icon_mode?
+            dex_number = getDexNumberForSpecies(preview.species)
+            dex_number = GameData::Species.get(dex_number).id_number if
+              dex_number.is_a?(Symbol)
+            return nil if regular_icon?(preview.species, dex_number)
+            return nil if isTripleFusion?(dex_number)
+            return nil if custom_fusion_icon_path(dex_number)
+            body_number = getBodyID(preview.species)
+            head_number = getHeadID(preview.species, body_number)
+            body_species = GameData::Species.get(body_number).species
+            head_species = GameData::Species.get(head_number).species
+            head = AnimatedBitmap.new(
+              GameData::Species.icon_filename(
+                head_species, preview.spriteform_head
+              )
+            )
+            body = AnimatedBitmap.new(
+              GameData::Species.icon_filename(
+                body_species, preview.spriteform_body
+              )
+            )
+            return nil unless head.bitmap && body.bitmap
+            width = head.bitmap.width.to_i
+            height = head.bitmap.height.to_i
+            return nil if width <= 0 || height <= 0
+            result = Bitmap.new(width, height)
+            result.blt(0, 0, head.bitmap, Rect.new(0, 0, width, height))
+            start_y = height / 2
+            start_y += Settings::FUSION_ICON_SPRITE_OFFSET.to_i if
+              defined?(Settings::FUSION_ICON_SPRITE_OFFSET)
+            copy_width = [width, body.bitmap.width.to_i].min
+            copy_height = [
+              height - start_y, body.bitmap.height.to_i - start_y
+            ].min
+            result.fill_rect(
+              0, start_y, width, height - start_y,
+              Color.new(0, 0, 0, 0)
+            ) if start_y >= 0 && start_y < height
+            if copy_width > 0 && copy_height > 0
+              result.blt(
+                0, start_y, body.bitmap,
+                Rect.new(0, start_y, copy_width, copy_height)
+              )
+            end
+            animated = AnimatedBitmap.from_bitmap(result)
+            frame_width = [height, 1].max
+            Entry.new(
+              animated, frame_width, height,
+              [width / frame_width, 1].max, 0, 0
+            )
+          rescue StandardError
+            result.dispose if result && !result.disposed?
+            nil
+          ensure
+            head.dispose if head && !head.disposed?
+            body.dispose if body && !body.disposed?
+          end
+
+          def big_icon_mode?
+            return false unless defined?($PokemonSystem) && $PokemonSystem
+            return false unless $PokemonSystem.respond_to?(:kuraybigicons)
+            [1, 2].include?($PokemonSystem.kuraybigicons.to_i)
+          rescue StandardError
+            false
+          end
+
+          def regular_icon?(species, dex_number)
+            return true if dex_number.to_i <= Settings::NB_POKEMON
+            variables = defined?($game_variables) ? $game_variables : nil
+            return false unless variables
+            return true if variables[VAR_FUSION_ICON_STYLE].to_i != 0
+            pbResolveBitmap(sprintf("Graphics/Icons/icon%03d", dex_number)) != nil
+          rescue StandardError
+            false
+          end
+
+          def custom_fusion_icon_path(dex_number)
+            resolver = PokemonIconSprite.allocate
+            path = resolver.send(:customIcons, dex_number)
+            resolve_source_path(path)
+          rescue StandardError
+            nil
+          end
+
+          def resolve_source_path(path)
+            return nil if path.to_s.empty?
+            resolved = pbResolveBitmap(path.to_s) rescue nil
+            candidate = resolved || path.to_s
+            return candidate if File.file?(candidate)
+            png = candidate + ".png"
+            File.file?(png) ? png : nil
+          rescue StandardError
+            nil
+          end
+
+          def substitution_signature(substitutions)
+            return "" unless substitutions.is_a?(Hash)
+            substitutions.keys.sort_by { |key| key.to_s }.map do |key|
+              "#{canonical_value(key)}=#{canonical_value(substitutions[key])}"
+            end.join("|")
+          rescue StandardError
+            ""
+          end
+
+          def canonical_value(value)
+            case value
+            when Array
+              "[" + value.map { |entry| canonical_value(entry) }.join(",") + "]"
+            when Hash
+              keys = value.keys.sort_by { |key| key.to_s }
+              "{" + keys.map do |key|
+                "#{canonical_value(key)}=#{canonical_value(value[key])}"
+              end.join(",") + "}"
+            else
+              value.to_s
+            end
+          end
+
+          def deterministic_personal_id(species)
+            value = 2_166_136_261
+            WildLink.species_key(species).each_byte do |byte|
+              value = ((value ^ byte) * 16_777_619) & 0xFFFFFFFF
+            end
+            value
+          rescue StandardError
+            0
+          end
+
+          def touch(key)
+            @order.delete(key)
+            @order << key
+          end
+
+          def trim
+            while @entries.length > cache_limit
+              key = @order.shift
+              break unless key
+              entry = @entries.delete(key)
+              entry.evict if entry
+            end
+          end
+
+          def cache_limit
+            if defined?(KantoReloaded::Platform) &&
+               KantoReloaded::Platform.respond_to?(:joiplay?) &&
+               KantoReloaded::Platform.joiplay?
+              JOIPLAY_LIMIT
+            else
+              DESKTOP_LIMIT
+            end
+          rescue StandardError
+            JOIPLAY_LIMIT
+          end
+        end
+      end
+
+      class PreviewIconSprite < Sprite
+        def initialize(entry, viewport)
+          super(viewport)
+          @entry = entry.acquire
+          @counter = 0
+          @current_frame = 0
+          self.bitmap = @entry.bitmap
+          self.src_rect.width = @entry.frame_width
+          self.src_rect.height = @entry.frame_height
+        end
+
+        def update
+          super
+          return unless @entry
+          @entry.update
+          self.bitmap = @entry.bitmap
+          limit = [
+            (Graphics.frame_rate / 4) / [@entry.frame_count, 1].max, 1
+          ].max
+          @counter += 1
+          if @counter >= limit
+            @current_frame = (@current_frame + 1) % @entry.frame_count
+            @counter = 0
+          end
+          self.src_rect.x = @entry.frame_width * @current_frame
+        end
+
+        def dispose
+          return if disposed?
+          self.bitmap = nil
+          super
+          @entry.release if @entry
+          @entry = nil
+        rescue StandardError
+          @entry.release if @entry
+          @entry = nil
+        end
+      end
+
       class << self
         def open
           return false unless graphics_available?
@@ -43,7 +394,8 @@ module KantoReloaded
         DETAIL_X = LIST_X + LIST_W + 8
         DETAIL_W = SCREEN_W - DETAIL_X - 8
         VISIBLE_ROWS = (LIST_H - 12) / ROW_H
-
+        ICON_CACHE_LIMIT = 40
+        JOIPLAY_ICON_CACHE_LIMIT = 24
         BG = Color.new(16, 20, 31)
         PANEL = Color.new(26, 32, 48)
         BORDER = Color.new(56, 79, 126)
@@ -57,8 +409,15 @@ module KantoReloaded
 
         def initialize
           @method_index = 0
+          @detail_page = :search_level
           @result = false
           @detail_icon_key = nil
+          @detail_icons = {}
+          @detail_icon_order = []
+          @active_detail_icon = nil
+          @active_detail_icon_cache_key = nil
+          @row_presentations = {}
+          @icon_context_signature = PreviewCache.context_signature
         end
 
         def main
@@ -66,12 +425,10 @@ module KantoReloaded
           loop do
             Graphics.update
             Input.update
-            @detail_icon.update if @detail_icon
+            @active_detail_icon.update if @active_detail_icon
             result = handle_input
             break if result == :close
-            if ((Graphics.frame_count rescue 0) % 4).zero?
-              draw_list
-            end
+            draw_list_cursor if ((Graphics.frame_count rescue 0) % 4).zero?
           end
           @result
         ensure
@@ -87,16 +444,24 @@ module KantoReloaded
           @background.bitmap = Bitmap.new(SCREEN_W, SCREEN_H)
           @background.bitmap.fill_rect(0, 0, SCREEN_W, SCREEN_H, BG)
           @header_sprite = BitmapSprite.new(SCREEN_W, HEADER_H, @viewport)
+          @list_panel_sprite = BitmapSprite.new(LIST_W, LIST_H, @viewport)
+          @list_cursor_sprite = BitmapSprite.new(
+            LIST_W - 14, ROW_H - 3, @viewport
+          )
           @list_sprite = BitmapSprite.new(LIST_W, LIST_H, @viewport)
           @detail_sprite = BitmapSprite.new(DETAIL_W, LIST_H, @viewport)
           @footer_sprite = BitmapSprite.new(SCREEN_W, FOOTER_H, @viewport)
+          @list_panel_sprite.x = LIST_X
+          @list_panel_sprite.y = LIST_Y
+          @list_panel_sprite.z = @viewport.z + 1
+          @list_cursor_sprite.z = @viewport.z + 2
           @list_sprite.x = LIST_X
           @list_sprite.y = LIST_Y
+          @list_sprite.z = @viewport.z + 3
           @detail_sprite.x = DETAIL_X
           @detail_sprite.y = LIST_Y
           @footer_sprite.y = SCREEN_H - FOOTER_H
-          @detail_icon = PokemonIconSprite.new(nil, @viewport)
-          @detail_icon.z = @viewport.z + 3
+          draw_list_panel
           load_methods
           draw_all
         end
@@ -128,6 +493,8 @@ module KantoReloaded
             end
             @state.select(index) if index
           end
+          build_row_presentations
+          build_method_completion
           @detail_icon_key = nil
         end
 
@@ -138,12 +505,19 @@ module KantoReloaded
           draw_footer
         end
 
+        def draw_list_panel
+          bitmap = @list_panel_sprite.bitmap
+          bitmap.clear
+          panel(bitmap, LIST_W, LIST_H)
+        end
+
         def draw_header
           bitmap = @header_sprite.bitmap
           bitmap.clear
           bitmap.fill_rect(0, 0, SCREEN_W, HEADER_H, BG)
           set_font(bitmap, 16)
           text(bitmap, 8, -1, SCREEN_W - 16, 24, _INTL("WILD LINK"), BLUE, 1, 16)
+          draw_method_completion(bitmap)
           if @methods.empty?
             text(
               bitmap, 8, 30, SCREEN_W - 16, 22,
@@ -154,6 +528,24 @@ module KantoReloaded
             draw_method_tabs(bitmap)
           end
           bitmap.fill_rect(0, HEADER_H - 1, SCREEN_W, 1, BORDER)
+        end
+
+        def draw_method_completion(bitmap)
+          progress = @method_completion
+          return unless progress && progress[:total].to_i > 0
+          total = progress[:total].to_i
+          text(
+            bitmap, 8, 1, 150, 18,
+            _INTL("Seen {1}/{2}", progress[:seen], total),
+            GOLD, 0, 12
+          )
+          text(
+            bitmap, SCREEN_W - 158, 1, 150, 18,
+            _INTL("Caught {1}/{2}", progress[:caught], total),
+            GREEN, 2, 12
+          )
+        rescue StandardError
+          nil
         end
 
         def draw_method_tabs(bitmap)
@@ -190,9 +582,9 @@ module KantoReloaded
         def draw_list
           bitmap = @list_sprite.bitmap
           bitmap.clear
-          panel(bitmap, LIST_W, LIST_H)
           set_font(bitmap, 15)
           if @state.empty?
+            @list_cursor_sprite.visible = false
             text(
               bitmap, 10, 104, LIST_W - 20, 24,
               _INTL("No Pokemon are available for this method."), DIM, 1
@@ -203,16 +595,22 @@ module KantoReloaded
             index = @state.scroll + local
             y = 6 + local * ROW_H
             selected = index == @state.index
-            cursor(bitmap, y) if selected
-            name = EncounterPools.entry_name(entry)
-            color = row_color(entry, selected)
-            text(bitmap, 14, y - 2, LIST_W - 112, ROW_H, name, color)
-            status = row_status(entry)
+            presentation = presentation_for(entry)
+            color = if entry[:signal] || entry[:rare]
+                      GOLD
+                    else
+                      selected ? WHITE : presentation[:row_color]
+                    end
+            text(
+              bitmap, 14, y - 2, LIST_W - 112, ROW_H,
+              presentation[:name], color
+            )
             text(
               bitmap, LIST_W - 110, y - 2, 94, ROW_H,
-              status, status_color(entry), 2
+              presentation[:status], presentation[:status_color], 2
             )
           end
+          draw_list_cursor
         end
 
         def draw_detail
@@ -222,7 +620,7 @@ module KantoReloaded
           set_font(bitmap, 15)
           entry = @state.current
           unless entry
-            @detail_icon.pokemon = nil
+            hide_active_detail_icon
             text(
               bitmap, 8, 104, DETAIL_W - 16, 24,
               _INTL("Select a signal."), DIM, 1
@@ -230,7 +628,7 @@ module KantoReloaded
             return
           end
           refresh_detail_icon(entry)
-          name = EncounterPools.entry_name(entry)
+          name = presentation_for(entry)[:name]
           text(bitmap, 8, 8, DETAIL_W - 16, 22, name, WHITE, 1)
           if entry[:signal]
             draw_signal_detail(bitmap, entry)
@@ -240,10 +638,36 @@ module KantoReloaded
         end
 
         def draw_signal_detail(bitmap, entry)
-          status = entry[:unlocked] ? _INTL("Signal Available") :
-            _INTL("Signal Locked")
-          color = entry[:unlocked] ? GREEN : RED
+          current = active_signal_target? ? Runtime.target : nil
+          status = if current
+                     _INTL("Active Signal")
+                   elsif entry[:unlocked]
+                     _INTL("Signal Available")
+                   else
+                     _INTL("Signal Locked")
+                   end
+          color = (current || entry[:unlocked]) ? GREEN : RED
           text(bitmap, 8, 34, DETAIL_W - 16, 20, status, color, 1)
+          if current
+            draw_search_and_chain(
+              bitmap,
+              current[:search_level].to_i,
+              current[:chain].to_i
+            )
+            if @detail_page == :bonuses
+              draw_bonus_preview(
+                bitmap, entry, current[:search_level], current[:chain],
+                161, current[:species]
+              )
+            else
+              draw_active_details(bitmap, current, 161)
+            end
+            return
+          end
+          if @detail_page == :bonuses
+            draw_bonus_preview(bitmap, entry, 0, 0, 161, nil)
+            return
+          end
           text(
             bitmap, 10, 123, DETAIL_W - 20, 38,
             entry[:unlocked] ?
@@ -255,35 +679,42 @@ module KantoReloaded
         end
 
         def draw_species_detail(bitmap, entry)
-          seen = WildLink.seen?(entry[:species])
-          caught = WildLink.caught?(entry[:species])
+          presentation = presentation_for(entry)
+          seen = presentation[:seen]
+          caught = presentation[:caught]
           status = caught ? _INTL("Caught") : (seen ? _INTL("Seen") : _INTL("Unseen"))
           color = caught ? GREEN : (seen ? GOLD : DIM)
           text(bitmap, 8, 34, DETAIL_W - 16, 20, status, color, 1)
           level = WildLink.search_level(entry[:species])
+          method_id = current_method ? current_method[:id] : :land
+          chain = WildLink.chain_for(entry[:species], method_id)
+          draw_search_and_chain(bitmap, level, chain)
+          active = active_target_for?(entry)
+          if @detail_page == :bonuses
+            draw_bonus_preview(bitmap, entry, level, chain, 161)
+          elsif active
+            draw_active_details(bitmap, Runtime.target, 161)
+          else
+            draw_search_level_info(bitmap, level, 161)
+          end
+        end
+
+        def draw_search_and_chain(bitmap, level, chain)
           text(
             bitmap, 10, 122, DETAIL_W - 20, 20,
             _INTL("Search Level"), GRAY
           )
           text(
             bitmap, 10, 122, DETAIL_W - 20, 20,
-            level.to_s, BLUE, 2
+            level.to_i.to_s, BLUE, 2
           )
-          method_id = current_method ? current_method[:id] : :land
-          chain = WildLink.chain_for(entry[:species], method_id)
           text(bitmap, 10, 143, DETAIL_W - 20, 20, _INTL("Chain"), GRAY)
-          text(bitmap, 10, 143, DETAIL_W - 20, 20, chain.to_s, GOLD, 2)
-          active = active_target_for?(entry)
-          if active
-            draw_active_details(bitmap, Runtime.target, 164)
-          else
-            draw_bonus_preview(bitmap, entry, level, chain, 161)
-            draw_next_unlock(bitmap, level, 254)
-          end
+          text(bitmap, 10, 143, DETAIL_W - 20, 20, chain.to_i.to_s, GOLD, 2)
         end
 
-        def draw_bonus_preview(bitmap, entry, level, chain, start_y)
-          preview = Bonuses.bonus_preview(level, chain, entry[:species])
+        def draw_bonus_preview(bitmap, entry, level, chain, start_y,
+                               species = entry[:species])
+          preview = Bonuses.bonus_preview(level, chain, species)
           native_min = entry[:min_level].to_i
           native_max = entry[:max_level].to_i
           native_levels = native_min == native_max ?
@@ -354,8 +785,15 @@ module KantoReloaded
 
         def draw_active_details(bitmap, current, start_y)
           lines = Runtime.target_summary_lines(current)
-          lines = [_INTL("Target details unlock as Search Level rises.")] if lines.empty?
+          locked_details = lines.empty?
+          if locked_details
+            lines = [_INTL("Target details unlock as Search Level rises.")]
+          end
           set_font(bitmap, 12)
+          text(
+            bitmap, 8, start_y, DETAIL_W - 16, 16,
+            _INTL("SEARCH LEVEL INFO"), BLUE, 1, 13
+          )
           wrapped = lines.inject([]) do |rows, line|
             rows.concat(
               KantoReloaded::UI::Draw.wrap_lines(
@@ -364,27 +802,41 @@ module KantoReloaded
             )
           end
           wrapped.first(8).each_with_index do |line, index|
+            color = locked_details ? GREEN : (index.zero? ? GREEN : GRAY)
             text(
-              bitmap, 8, start_y + index * 14, DETAIL_W - 16, 16,
-              line, index.zero? ? GREEN : GRAY, 1, 12
+              bitmap, 8, start_y + 15 + index * 12, DETAIL_W - 16, 14,
+              line, color, 1, 12
             )
           end
         end
 
-        def draw_next_unlock(bitmap, level, y)
-          threshold, label = next_unlock(level)
-          if threshold
+        def draw_search_level_info(bitmap, level, start_y)
+          text(
+            bitmap, 8, start_y, DETAIL_W - 16, 16,
+            _INTL("SEARCH LEVEL INFO"), BLUE, 1, 13
+          )
+          unlock_rows.each_with_index do |row, index|
+            threshold, label = row
+            unlocked = level.to_i >= threshold
             text(
-              bitmap, 8, y, DETAIL_W - 16, 20,
-              _INTL("Next: {1} at SL {2}", label, threshold),
-              DIM, 1, 13
-            )
-          else
-            text(
-              bitmap, 8, y, DETAIL_W - 16, 20,
-              _INTL("All scan details unlocked."), GREEN, 1, 13
+              bitmap, 8, start_y + 16 + index * 13,
+              DETAIL_W - 16, 16,
+              _INTL("SL {1}  {2}", threshold, label),
+              unlocked ? GREEN : DIM, 1, 12
             )
           end
+        end
+
+        def unlock_rows
+          [
+            [1, _INTL("Target Level")],
+            [5, _INTL("Temperament")],
+            [10, _INTL("Perfect IVs")],
+            [15, _INTL("Held Item")],
+            [20, _INTL("Ability")],
+            [25, _INTL("Egg Moves")],
+            [50, _INTL("Signal Location")]
+          ]
         end
 
         def draw_footer
@@ -408,6 +860,9 @@ module KantoReloaded
           ]
           entries << KantoReloaded::HintText.action("Cancel Link") if
             cancellable_link?
+          entries << KantoReloaded::HintText.special(
+            @detail_page == :bonuses ? "SL Info" : "Bonuses"
+          )
           entries << KantoReloaded::HintText.other("Method", "L/R")
           entries
         end
@@ -439,6 +894,8 @@ module KantoReloaded
             change_method(-1)
           elsif trigger?(:AUX2)
             change_method(1)
+          elsif trigger?(:SPECIAL)
+            toggle_detail_page
           elsif Input.trigger?(Input::ACTION) && cancellable_link?
             return cancel_current_link
           elsif Input.trigger?(Input::USE)
@@ -447,6 +904,14 @@ module KantoReloaded
             pbPlayCloseMenuSE rescue nil
             return :close
           end
+          :continue
+        end
+
+        def toggle_detail_page
+          @detail_page = @detail_page == :bonuses ? :search_level : :bonuses
+          pbPlayCursorSE rescue nil
+          draw_detail
+          draw_footer
           :continue
         end
 
@@ -487,7 +952,7 @@ module KantoReloaded
             draw_all
             return :continue
           end
-          label = EncounterPools.entry_name(entry)
+          label = presentation_for(entry)[:name]
           proceed = WildLink.confirm(
             _INTL("Start a Wild Link search for {1}?", label),
             :default => true
@@ -506,14 +971,12 @@ module KantoReloaded
         end
 
         def searchable?(entry)
-          return !!entry[:unlocked] if entry[:signal]
-          WildLink.seen?(entry[:species])
+          presentation_for(entry)[:searchable]
         end
 
         def move(amount)
           return unless @state.move(amount)
           pbPlayCursorSE rescue nil
-          @detail_icon_key = nil
           draw_list
           draw_detail
         end
@@ -551,7 +1014,6 @@ module KantoReloaded
           return nil if index < 0 || index >= @state.rows.length
           if index != @state.index
             @state.select(index)
-            @detail_icon_key = nil
             draw_list
             draw_detail
           end
@@ -593,44 +1055,225 @@ module KantoReloaded
         end
 
         def refresh_detail_icon(entry)
-          species = entry[:species]
-          key = [
-            WildLink.species_key(species), WildLink.caught?(species),
-            entry[:signal]
+          request = detail_icon_request(entry)
+          return hide_active_detail_icon unless request
+          presentation = presentation_for(entry)
+          display_key = [
+            request[:key], presentation[:caught], entry[:signal],
+            request[:active_signal]
           ]
-          return if @detail_icon_key == key
-          @detail_icon_key = key
-          pokemon = Pokemon.new(species, 5)
-          @detail_icon.pokemon = pokemon
-          @detail_icon.x = DETAIL_X + (DETAIL_W - 64) / 2
-          @detail_icon.y = LIST_Y + 55
-          if entry[:signal] || !WildLink.caught?(species)
-            @detail_icon.color = Color.new(0, 0, 0, 255)
+          if @detail_icon_key == display_key && @active_detail_icon
+            touch_detail_icon(request[:key])
+            return
+          end
+          icon = cached_detail_icon(request[:key], request[:species])
+          return hide_active_detail_icon unless icon
+          hide_active_detail_icon unless @active_detail_icon.equal?(icon)
+          @active_detail_icon = icon
+          @active_detail_icon_cache_key = request[:key]
+          @detail_icon_key = display_key
+          icon.visible = true
+          if entry[:signal] || !presentation[:caught]
+            icon.color = Color.new(0, 0, 0, 255)
           else
-            @detail_icon.color = Color.new(0, 0, 0, 0)
+            icon.color = Color.new(0, 0, 0, 0)
           end
         rescue StandardError
-          @detail_icon.pokemon = nil if @detail_icon
+          hide_active_detail_icon
         end
 
-        def row_color(entry, selected)
-          return selected ? WHITE : DIM if entry[:signal] && !entry[:unlocked]
-          return selected ? WHITE : GREEN if entry[:rare] && WildLink.seen?(entry[:species])
-          selected ? WHITE : GRAY
+        def detail_icon_request(entry)
+          return nil unless entry
+          active_signal = entry[:signal] && active_signal_target?
+          species = active_signal ? Runtime.target[:species] : entry[:species]
+          return nil unless species
+          {
+            :key => WildLink.species_key(species),
+            :species => species,
+            :active_signal => active_signal
+          }
+        rescue StandardError
+          nil
         end
 
-        def row_status(entry)
-          return entry[:unlocked] ? _INTL("Ready") : _INTL("Locked") if entry[:signal]
-          return _INTL("Caught") if WildLink.caught?(entry[:species])
-          return _INTL("Seen") if WildLink.seen?(entry[:species])
-          _INTL("Unknown")
+        def cached_detail_icon(key, species)
+          icon = @detail_icons[key]
+          if icon && !icon.disposed?
+            touch_detail_icon(key)
+            return icon
+          end
+          @detail_icons.delete(key)
+          @detail_icon_order.delete(key)
+          entry = PreviewCache.fetch(species, @icon_context_signature)
+          return nil unless entry
+          icon = PreviewIconSprite.new(entry, @viewport)
+          icon.x = DETAIL_X + (DETAIL_W - 64) / 2 + entry.offset_x
+          icon.y = LIST_Y + 55 + entry.offset_y
+          icon.z = @viewport.z + 3
+          icon.visible = false
+          @detail_icons[key] = icon
+          touch_detail_icon(key)
+          trim_detail_icon_cache
+          icon
+        rescue StandardError => e
+          WildLink.log_exception("Wild Link preview cache failed", e)
+          nil
         end
 
-        def status_color(entry)
-          return entry[:unlocked] ? GREEN : RED if entry[:signal]
-          return GREEN if WildLink.caught?(entry[:species])
-          return GOLD if WildLink.seen?(entry[:species])
-          DIM
+        def touch_detail_icon(key)
+          @detail_icon_order.delete(key)
+          @detail_icon_order << key
+        end
+
+        def trim_detail_icon_cache
+          while @detail_icons.length > detail_icon_cache_limit
+            victim = @detail_icon_order.find do |key|
+              key != @active_detail_icon_cache_key
+            end
+            break unless victim
+            @detail_icon_order.delete(victim)
+            icon = @detail_icons.delete(victim)
+            icon.dispose if icon && !icon.disposed?
+          end
+        rescue StandardError
+          nil
+        end
+
+        def detail_icon_cache_limit
+          if defined?(KantoReloaded::Platform) &&
+             KantoReloaded::Platform.respond_to?(:joiplay?) &&
+             KantoReloaded::Platform.joiplay?
+            JOIPLAY_ICON_CACHE_LIMIT
+          else
+            ICON_CACHE_LIMIT
+          end
+        rescue StandardError
+          JOIPLAY_ICON_CACHE_LIMIT
+        end
+
+        def hide_active_detail_icon
+          if @active_detail_icon && !@active_detail_icon.disposed?
+            @active_detail_icon.visible = false
+          end
+          @active_detail_icon = nil
+          @active_detail_icon_cache_key = nil
+          @detail_icon_key = nil
+        rescue StandardError
+          @active_detail_icon = nil
+          @active_detail_icon_cache_key = nil
+          @detail_icon_key = nil
+        end
+
+        def build_row_presentations
+          @row_presentations = {}
+          @entries.each do |entry|
+            signal = !!entry[:signal]
+            seen = signal ? false : WildLink.seen?(entry[:species])
+            caught = signal ? false : WildLink.caught?(entry[:species])
+            status = if signal
+                       entry[:unlocked] ? _INTL("Ready") : _INTL("Locked")
+                     elsif caught
+                       _INTL("Caught")
+                     elsif seen
+                       _INTL("Seen")
+                     else
+                       _INTL("Unknown")
+                     end
+            status_color = if signal
+                             entry[:unlocked] ? GREEN : RED
+                           elsif caught
+                             GREEN
+                           elsif seen
+                             GOLD
+                           else
+                             DIM
+                           end
+            row_color = (signal || entry[:rare]) ? GOLD : GRAY
+            @row_presentations[entry.object_id] = {
+              :name => EncounterPools.entry_name(entry),
+              :status => status,
+              :status_color => status_color,
+              :row_color => row_color,
+              :seen => seen,
+              :caught => caught,
+              :searchable => signal ? !!entry[:unlocked] : seen
+            }
+          end
+        rescue StandardError
+          @row_presentations = {}
+        end
+
+        def build_method_completion
+          seen = 0
+          caught = 0
+          total = 0
+          counted = {}
+          @entries.each do |entry|
+            if entry[:signal]
+              signals = EncounterPools.signal_species(entry)
+              hidden = signals.reject do |species|
+                counted[WildLink.species_key(species)]
+              end
+              if signals.empty?
+                total += 1
+              else
+                hidden.each do |species|
+                  counted[WildLink.species_key(species)] = true
+                end
+                total += hidden.length
+              end
+              next
+            end
+            key = WildLink.species_key(entry[:species])
+            next if counted[key]
+            counted[key] = true
+            presentation = presentation_for(entry)
+            total += 1
+            seen += 1 if presentation[:seen] || presentation[:caught]
+            caught += 1 if presentation[:caught]
+          end
+          @method_completion = {
+            :seen => seen,
+            :caught => caught,
+            :total => total
+          }
+        rescue StandardError
+          @method_completion = nil
+        end
+
+        def presentation_for(entry)
+          presentation = @row_presentations[entry.object_id]
+          return presentation if presentation
+          signal = !!entry[:signal]
+          seen = signal ? false : WildLink.seen?(entry[:species])
+          caught = signal ? false : WildLink.caught?(entry[:species])
+          status = if signal
+                     entry[:unlocked] ? _INTL("Ready") : _INTL("Locked")
+                   elsif caught
+                     _INTL("Caught")
+                   elsif seen
+                     _INTL("Seen")
+                   else
+                     _INTL("Unknown")
+                   end
+          status_color = if signal
+                           entry[:unlocked] ? GREEN : RED
+                         elsif caught
+                           GREEN
+                         elsif seen
+                           GOLD
+                         else
+                           DIM
+                         end
+          {
+            :name => EncounterPools.entry_name(entry),
+            :status => status,
+            :status_color => status_color,
+            :row_color => (signal || entry[:rare]) ? GOLD : GRAY,
+            :seen => seen,
+            :caught => caught,
+            :searchable => signal ? !!entry[:unlocked] : seen
+          }
         end
 
         def active_target_for?(entry)
@@ -641,16 +1284,12 @@ module KantoReloaded
               WildLink.species_key(entry[:species])
         end
 
-        def next_unlock(level)
-          [
-            [1, _INTL("target level")],
-            [5, _INTL("temperament")],
-            [10, _INTL("potential")],
-            [15, _INTL("held item")],
-            [20, _INTL("ability")],
-            [25, _INTL("Egg Moves")],
-            [50, _INTL("exact signal direction")]
-          ].find { |row| level.to_i < row[0] }
+        def active_signal_target?
+          current = Runtime.target
+          return false unless current && current[:rare_signal] && current_method
+          current[:method_id] == current_method[:id]
+        rescue StandardError
+          false
         end
 
         def current_method
@@ -674,13 +1313,36 @@ module KantoReloaded
           )
         end
 
-        def cursor(bitmap, y)
-          fill, border = KantoReloaded::Options.cursor_colors
-          KantoReloaded::UI::Draw.rounded_rect(
-            bitmap, 7, y + 2, LIST_W - 14, ROW_H - 3, 4, fill, border
+        def draw_list_cursor
+          return unless @list_cursor_sprite
+          if !@state || @state.empty?
+            @list_cursor_sprite.visible = false
+            return
+          end
+          local = @state.index - @state.scroll
+          unless local >= 0 && local < VISIBLE_ROWS
+            @list_cursor_sprite.visible = false
+            return
+          end
+          frame = Graphics.frame_count rescue 0
+          pulse = Math.sin(frame * Math::PI / 20.0) * 0.5 + 0.5
+          fill_base, border_base = KantoReloaded::Options.cursor_colors
+          fill = KantoReloaded::UI::Draw.with_alpha(
+            fill_base, 90 + (pulse * 80).to_i
           )
+          border = KantoReloaded::UI::Draw.with_alpha(
+            border_base, 155 + (pulse * 80).to_i
+          )
+          bitmap = @list_cursor_sprite.bitmap
+          bitmap.clear
+          KantoReloaded::UI::Draw.rounded_rect(
+            bitmap, 0, 0, bitmap.width, bitmap.height, 4, fill, border
+          )
+          @list_cursor_sprite.x = LIST_X + 7
+          @list_cursor_sprite.y = LIST_Y + 8 + local * ROW_H
+          @list_cursor_sprite.visible = true
         rescue StandardError
-          nil
+          @list_cursor_sprite.visible = false if @list_cursor_sprite
         end
 
         def set_font(bitmap, size = 15)
@@ -702,8 +1364,14 @@ module KantoReloaded
         end
 
         def dispose
-          @detail_icon.dispose if @detail_icon && !@detail_icon.disposed?
-          [@background, @header_sprite, @list_sprite, @detail_sprite,
+          @detail_icons.each_value do |icon|
+            icon.dispose if icon && !icon.disposed?
+          rescue StandardError
+            nil
+          end
+          @detail_icons.clear
+          [@background, @header_sprite, @list_panel_sprite,
+           @list_cursor_sprite, @list_sprite, @detail_sprite,
            @footer_sprite].each do |sprite|
             next unless sprite
             if sprite.bitmap && !sprite.bitmap.disposed?
@@ -748,6 +1416,11 @@ module KantoReloaded
           _INTL("Chain Scope"),
           proc { _INTL("Pokemon / Method / Map") },
           _INTL("Changing the Pokemon, method, or map ends the active chain.")
+        )
+        rows << KantoReloaded::Options::ActionButton.new(
+          _INTL("Gather Map Data"),
+          proc { KantoReloaded::WildLink::MapData.file },
+          _INTL("Create and upload Wild Link diagnostics for the current map.")
         )
         rows << KantoReloaded::Options::ActionButton.new(
           _INTL("Reset Search Levels"),

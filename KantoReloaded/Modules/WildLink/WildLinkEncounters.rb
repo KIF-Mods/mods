@@ -10,6 +10,12 @@ module KantoReloaded
         [:GoodRod, :GOODROD],
         [:SuperRod, :SUPERROD]
       ].freeze
+      ROCK_SMASH_FALLBACK = :WildLinkRockSmashFallback
+      FALLBACK_RARE_CANDIDATE_COUNT = 12
+      FALLBACK_RARE_BST_BONUS = 50
+      TIME_SUFFIXES = [
+        "Morning", "Afternoon", "Evening", "Day", "Night"
+      ].freeze
 
       class << self
         def available_methods
@@ -19,7 +25,9 @@ module KantoReloaded
           rows << method_row(:surf, encounter_types_for(:water)) if surf_available?
           fishing = available_rod_types
           rows << method_row(:fishing, fishing) unless fishing.empty?
-          headbutt = [:HeadbuttLow, :HeadbuttHigh].select { |id| has_type?(id) }
+          headbutt = [:HeadbuttLow, :HeadbuttHigh].select do |id|
+            has_effective_type?(id)
+          end
           rows << method_row(:headbutt, headbutt) if !headbutt.empty? && nearby_event?(/headbutttree/i)
           rock = rock_smash_encounter_types
           rows << method_row(:rock_smash, rock) if !rock.empty? && nearby_event?(/smashrock/i)
@@ -33,7 +41,6 @@ module KantoReloaded
           return [] unless method
           records = encounter_records(Array(method[:encounter_types]))
           entries = merge_records(records)
-          add_discovered_fusions(entries, method[:id])
           add_rare_signal(entries, method) if method[:id] == :land
           entries.sort_by do |entry|
             status = entry[:signal] ? 3 : (WildLink.seen?(entry[:species]) ? 0 : 2)
@@ -57,7 +64,7 @@ module KantoReloaded
           if entry[:signal]
             candidate = weighted_rare_record(Array(entry[:rare_records]))
             return nil unless candidate
-            species = mapped_species(candidate[2])
+            species = rare_record_species(candidate)
             level = random_level(candidate[3], candidate[4] || candidate[3])
             return {
               :species => species,
@@ -88,9 +95,21 @@ module KantoReloaded
           end
         end
 
+        def signal_species(entry)
+          return [] unless entry && entry[:signal]
+          found = {}
+          Array(entry[:rare_records]).each do |record|
+            species = rare_record_species(record)
+            found[WildLink.species_key(species)] ||= species if species
+          end
+          found.values
+        rescue StandardError
+          []
+        end
+
         def standard_seen_for_method?(entries)
           standards = entries.reject do |entry|
-            entry[:signal] || entry[:rare] || entry[:discovered_fusion]
+            entry[:signal] || entry[:rare]
           end
           !standards.empty? && standards.all? { |entry| WildLink.seen?(entry[:species]) }
         end
@@ -131,35 +150,119 @@ module KantoReloaded
         end
 
         def surf_available?
-          encounter_types_for(:water).any? && !!$PokemonGlobal.surfing
+          return false unless encounter_types_for(:water).any?
+          return true if $PokemonGlobal && $PokemonGlobal.surfing
+          surf_access?
+        rescue StandardError
+          false
+        end
+
+        def surf_access?
+          return true if bag_has?(:SURFBOARD)
+          return false unless defined?(::Settings::BADGE_FOR_SURF)
+          return false unless hidden_move_badge?(::Settings::BADGE_FOR_SURF)
+          return true if defined?($DEBUG) && $DEBUG
+          return false unless $Trainer &&
+                              $Trainer.respond_to?(:get_pokemon_with_move)
+          !!$Trainer.get_pokemon_with_move(:SURF)
+        rescue StandardError
+          false
+        end
+
+        def hidden_move_badge?(badge)
+          method_name = :pbCheckHiddenMoveBadge
+          return false unless Object.private_method_defined?(method_name) ||
+                              Object.method_defined?(method_name)
+          !!Object.new.__send__(method_name, badge, false)
         rescue StandardError
           false
         end
 
         def encounter_types_for(kind)
           return [] unless $PokemonEncounters
+          time = current_encounter_time
+          bases = all_encounter_types_for(kind).map do |encounter_type|
+            base_encounter_type(encounter_type)
+          end
+          bases.uniq.each_with_object([]) do |base_type, rows|
+            resolved = effective_encounter_type_for_time(base_type, time)
+            rows << resolved if resolved && !rows.include?(resolved)
+          end
+        rescue StandardError
+          []
+        end
+
+        def all_encounter_types_for(kind)
           rows = []
           GameData::EncounterType.each do |encounter_type|
             next unless encounter_type.type == kind
             next if encounter_type.id == :BugContest
-            rows << encounter_type.id if has_type?(encounter_type.id)
+            rows << encounter_type.id if has_effective_type?(encounter_type.id)
           end
           rows
         rescue StandardError
           []
         end
 
+        def base_encounter_type(encounter_type)
+          id = encounter_type.to_sym
+          text = id.to_s
+          TIME_SUFFIXES.each do |suffix|
+            next unless text.end_with?(suffix)
+            base_text = text[0, text.length - suffix.length]
+            next if base_text.empty?
+            base_id = base_text.to_sym
+            return base_id if GameData::EncounterType.exists?(base_id)
+          end
+          id
+        rescue StandardError
+          encounter_type
+        end
+
+        def effective_encounter_type_for_time(base_type, time)
+          if PBDayNight.isDay?(time)
+            timed = if PBDayNight.isMorning?(time)
+                      "#{base_type}Morning".to_sym
+                    elsif PBDayNight.isAfternoon?(time)
+                      "#{base_type}Afternoon".to_sym
+                    elsif PBDayNight.isEvening?(time)
+                      "#{base_type}Evening".to_sym
+                    end
+            return timed if timed && has_effective_type?(timed)
+            day_type = "#{base_type}Day".to_sym
+            return day_type if has_effective_type?(day_type)
+          else
+            night_type = "#{base_type}Night".to_sym
+            return night_type if has_effective_type?(night_type)
+          end
+          has_effective_type?(base_type) ? base_type : nil
+        rescue StandardError
+          has_effective_type?(base_type) ? base_type : nil
+        end
+
+        def current_encounter_time
+          method_name = :pbGetTimeNow
+          if Object.private_method_defined?(method_name) ||
+             Object.method_defined?(method_name)
+            return Object.new.__send__(method_name)
+          end
+          Time.now
+        rescue StandardError
+          Time.now
+        end
+
         def available_rod_types
           ROD_TYPES.each_with_object([]) do |pair, rows|
             encounter_type, item = pair
-            next unless has_type?(encounter_type)
+            next unless has_effective_type?(encounter_type)
             next unless bag_has?(item)
             rows << encounter_type
           end
         end
 
         def rock_smash_encounter_types
-          has_type?(:RockSmash) ? [:RockSmash] : []
+          return [:RockSmash] if has_effective_type?(:RockSmash)
+          [ROCK_SMASH_FALLBACK]
         rescue StandardError
           []
         end
@@ -179,6 +282,15 @@ module KantoReloaded
           false
         end
 
+        def has_effective_type?(encounter_type)
+          return true if has_type?(encounter_type)
+          return false unless area_mapping_enabled?
+          table = randomized_area_table(encounter_type)
+          table.is_a?(Array) && !table.empty?
+        rescue StandardError
+          false
+        end
+
         def nearby_event?(pattern)
           !nearby_named_events(pattern).empty?
         end
@@ -186,10 +298,17 @@ module KantoReloaded
         def encounter_records(encounter_types)
           records = []
           encounter_types.each do |encounter_type|
-            table = $PokemonEncounters.listPossibleEncounters(encounter_type)
+            if encounter_type == ROCK_SMASH_FALLBACK
+              species = native_static_randomized_species(:GEODUDE)
+              records << [
+                100, species, 5, 14, ROCK_SMASH_FALLBACK
+              ] if species && GameData::Species.exists?(species)
+              next
+            end
+            table = effective_encounter_table(encounter_type)
             Array(table).each do |record|
               next unless record.is_a?(Array) && record.length >= 4
-              species = mapped_species(record[1])
+              species = effective_table_species(record[1])
               next unless species && GameData::Species.exists?(species)
               records << [
                 record[0].to_i, species, record[2].to_i, record[3].to_i,
@@ -198,6 +317,107 @@ module KantoReloaded
             end
           end
           records
+        end
+
+        def native_static_randomized_species(source_species)
+          species = GameData::Species.get(source_species).id
+          method_name = :pbKurayRandomize
+          available = Object.private_method_defined?(method_name) ||
+                      Object.method_defined?(method_name)
+          return species unless available
+          receiver = Object.new
+          dynamic = if defined?(KantoReloaded::Randomizer::DynamicPokemon)
+                      KantoReloaded::Randomizer::DynamicPokemon
+                    end
+          randomized = if dynamic &&
+                          dynamic.respond_to?(:without_dynamic_randomization)
+                         dynamic.without_dynamic_randomization do
+                           receiver.__send__(method_name, species)
+                         end
+                       else
+                         receiver.__send__(method_name, species)
+                       end
+          randomized ? GameData::Species.get(randomized).id : species
+        rescue StandardError => e
+          WildLink.log_exception(
+            "Wild Link static encounter randomization failed", e
+          )
+          species || source_species
+        end
+
+        def effective_table_species(species)
+          native_static_randomized_species(mapped_species(species))
+        end
+
+        def effective_rare_species(species)
+          native_static_randomized_species(mapped_species(species))
+        end
+
+        def effective_encounter_table(encounter_type)
+          live_table = live_encounter_table(encounter_type)
+          if area_mapping_enabled?
+            area_table = randomized_area_table(encounter_type)
+            return live_table if area_table_covered_by_live?(
+              area_table, live_table
+            )
+            return area_table unless area_table.nil?
+          end
+          live_table
+        rescue StandardError => e
+          WildLink.log_exception(
+            "Wild Link effective encounter table failed", e
+          )
+          []
+        end
+
+        def live_encounter_table(encounter_type)
+          return [] unless $PokemonEncounters
+          Array($PokemonEncounters.listPossibleEncounters(encounter_type))
+        rescue StandardError
+          []
+        end
+
+        def area_table_covered_by_live?(area_table, live_table)
+          return false unless area_table.is_a?(Array)
+          return Array(live_table).empty? if area_table.empty?
+          available = Hash.new(0)
+          Array(live_table).each do |record|
+            available[encounter_record_key(record)] += 1
+          end
+          area_table.all? do |record|
+            key = encounter_record_key(record)
+            next false if available[key] <= 0
+            available[key] -= 1
+            true
+          end
+        rescue StandardError
+          false
+        end
+
+        def encounter_record_key(record)
+          return record unless record.is_a?(Array)
+          species = GameData::Species.get(record[1]).id
+          [record[0].to_f, species, record[2].to_i, record[3].to_i]
+        rescue StandardError
+          record
+        end
+
+        def randomized_area_table(encounter_type)
+          return nil unless defined?(GameData::EncounterRandom)
+          version = if defined?($PokemonGlobal) && $PokemonGlobal &&
+                       $PokemonGlobal.respond_to?(:encounter_version)
+                      $PokemonGlobal.encounter_version
+                    end
+          data = GameData::EncounterRandom.get(
+            WildLink.current_map_id, version
+          )
+          return nil unless data && data.respond_to?(:types)
+          data.types[encounter_type]
+        rescue StandardError => e
+          WildLink.log_exception(
+            "Wild Link area encounter table failed", e
+          )
+          nil
         end
 
         def merge_records(records)
@@ -220,34 +440,12 @@ module KantoReloaded
           merged.values
         end
 
-        def add_discovered_fusions(entries, method_id)
-          WildLink.discovered_fusions(method_id).each do |record|
-            species = record[:species]
-            next if entries.any? do |entry|
-              WildLink.species_key(entry[:species]) ==
-                WildLink.species_key(species)
-            end
-            minimum = record[:min_level].to_i
-            maximum = record[:max_level].to_i
-            entries << {
-              :species => species,
-              :weight => 1,
-              :min_level => minimum,
-              :max_level => maximum,
-              :records => [
-                [1, species, minimum, maximum, :DiscoveredFusion]
-              ],
-              :discovered_fusion => true
-            }
-          end
-          entries
-        end
-
         def add_rare_signal(entries, method)
-          rare = rare_records
+          map_entries = map_wide_land_entries
+          rare = rare_records(map_entries)
           return entries if rare.empty?
           rare.each do |record|
-            species = mapped_species(record[2])
+            species = rare_record_species(record)
             next unless WildLink.seen?(species)
             existing = entries.find do |entry|
               WildLink.species_key(entry[:species]) == WildLink.species_key(species)
@@ -265,12 +463,14 @@ module KantoReloaded
               :rare => true
             }
           end
-          unseen = rare.reject { |record| WildLink.seen?(mapped_species(record[2])) }
+          unseen = rare.reject do |record|
+            WildLink.seen?(rare_record_species(record))
+          end
           return entries if unseen.empty?
           entries << {
-            :species => mapped_species(unseen[0][2]),
+            :species => rare_record_species(unseen[0]),
             :signal => true,
-            :unlocked => standard_seen_for_method?(entries),
+            :unlocked => standard_seen_for_method?(map_entries),
             :rare_records => unseen,
             :min_level => unseen.map { |record| record[3].to_i }.min,
             :max_level => unseen.map { |record| (record[4] || record[3]).to_i }.max
@@ -278,14 +478,156 @@ module KantoReloaded
           entries
         end
 
-        def rare_records
-          return [] unless defined?(Settings::POKE_RADAR_ENCOUNTERS)
-          Array(Settings::POKE_RADAR_ENCOUNTERS).select do |record|
-            record.is_a?(Array) && record[0].to_i == WildLink.current_map_id &&
-              GameData::Species.exists?(record[2])
-          end
+        def rare_records(entries = [])
+          authored = if defined?(Settings::POKE_RADAR_ENCOUNTERS)
+                       Array(Settings::POKE_RADAR_ENCOUNTERS).select do |record|
+                         record.is_a?(Array) &&
+                           record[0].to_i == WildLink.current_map_id &&
+                           GameData::Species.exists?(record[2])
+                       end
+                     else
+                       []
+                     end
+          return authored unless authored.empty?
+          fallback = fallback_rare_record(entries)
+          fallback ? [fallback] : []
         rescue StandardError
           []
+        end
+
+        def map_wide_land_entries
+          records = encounter_records(all_encounter_types_for(:land))
+          merge_records(records)
+        rescue StandardError
+          []
+        end
+
+        def rare_record_species(record)
+          species = record[2]
+          return GameData::Species.get(species).id if
+            record[5] == :wild_link_effective
+          effective_rare_species(species)
+        rescue StandardError
+          species
+        end
+
+        def fallback_rare_record(entries)
+          rows = Array(entries).reject { |entry| entry[:signal] || entry[:rare] }
+          average = fallback_average_bst(rows)
+          return nil unless average
+          target_bst = average + FALLBACK_RARE_BST_BONUS
+          route_species = {}
+          rows.each do |entry|
+            route_species[WildLink.species_key(entry[:species])] = true
+          end
+          candidates = fallback_species_pool.reject do |row|
+            route_species[WildLink.species_key(row[0])]
+          end
+          return nil if candidates.empty?
+          candidates.sort_by! { |row| [(row[1] - target_bst).abs, row[2]] }
+          count = [FALLBACK_RARE_CANDIDATE_COUNT, candidates.length].min
+          candidate = candidates[fallback_rare_seed(rows, target_bst) % count]
+          minimum = rows.map { |entry| entry[:min_level].to_i }.
+            select { |level| level > 0 }.min || 1
+          maximum = rows.map { |entry| entry[:max_level].to_i }.
+            select { |level| level > 0 }.max || minimum
+          [
+            WildLink.current_map_id, 1, candidate[0],
+            minimum, [maximum, minimum].max, :wild_link_effective
+          ]
+        rescue StandardError => e
+          WildLink.log_exception("Wild Link fallback rare selection failed", e)
+          nil
+        end
+
+        def fallback_average_bst(entries)
+          total = 0
+          weight_total = 0
+          Array(entries).each do |entry|
+            bst = fallback_species_bst(entry[:species])
+            next unless bst
+            weight = [entry[:weight].to_i, 1].max
+            total += bst * weight
+            weight_total += weight
+          end
+          return nil if weight_total <= 0
+          (total.to_f / weight_total).round
+        rescue StandardError
+          nil
+        end
+
+        def fallback_species_pool
+          return @fallback_species_pool if @fallback_species_pool
+          maximum = if defined?(Settings::NB_POKEMON)
+                      Settings::NB_POKEMON.to_i
+                    elsif defined?(NB_POKEMON)
+                      NB_POKEMON.to_i
+                    else
+                      0
+                    end
+          values = []
+          1.upto(maximum) do |number|
+            data = GameData::Species.try_get(number)
+            next unless data
+            next if fallback_legendary?(number)
+            bst = fallback_species_bst(data.id)
+            values << [data.id, bst, number] if bst
+          end
+          @fallback_species_pool = values.freeze
+        rescue StandardError => e
+          WildLink.log_exception("Wild Link fallback rare pool failed", e)
+          @fallback_species_pool = [].freeze
+        end
+
+        def fallback_species_bst(species)
+          @fallback_species_bst ||= {}
+          key = WildLink.species_key(species)
+          return @fallback_species_bst[key] if
+            @fallback_species_bst.has_key?(key)
+          stats = GameData::Species.get(species).base_stats
+          total = [
+            :HP, :ATTACK, :DEFENSE,
+            :SPECIAL_ATTACK, :SPECIAL_DEFENSE, :SPEED
+          ].inject(0) { |sum, stat| sum + stats[stat].to_i }
+          @fallback_species_bst[key] = total > 0 ? total : nil
+        rescue StandardError
+          @fallback_species_bst[key] = nil if key
+          nil
+        end
+
+        def fallback_legendary?(species)
+          @fallback_legendary ||= {}
+          number = GameData::Species.get(species).id_number.to_i
+          return @fallback_legendary[number] if
+            @fallback_legendary.has_key?(number)
+          value = if Object.private_method_defined?(:is_legendary)
+                    Object.new.send(:is_legendary, number)
+                  elsif Object.method_defined?(:is_legendary)
+                    Object.new.send(:is_legendary, number)
+                  else
+                    false
+                  end
+          @fallback_legendary[number] = !!value
+        rescue StandardError
+          @fallback_legendary[number] = false if number
+          false
+        end
+
+        def fallback_rare_seed(entries, average)
+          value = 2_166_136_261
+          source = [
+            WildLink.current_map_id,
+            average,
+            Array(entries).map do |entry|
+              WildLink.species_key(entry[:species])
+            end.sort.join(",")
+          ].join("|")
+          source.each_byte do |byte|
+            value = ((value ^ byte) * 16_777_619) & 0xFFFFFFFF
+          end
+          value
+        rescue StandardError
+          WildLink.current_map_id.to_i
         end
 
         def mapped_species(species)
@@ -299,14 +641,31 @@ module KantoReloaded
         end
 
         def global_mapping_enabled?
-          return false unless $game_switches
-          return false unless Object.const_defined?(:SWITCH_RANDOM_WILD)
-          return false unless $game_switches[Object.const_get(:SWITCH_RANDOM_WILD)]
-          if Object.const_defined?(:SWITCH_RANDOM_WILD_AREA)
-            return false if $game_switches[Object.const_get(:SWITCH_RANDOM_WILD_AREA)]
+          return false unless base_randomization_enabled?
+          return false if area_mapping_enabled?
+          if Object.const_defined?(:SWITCH_WILD_RANDOM_GLOBAL)
+            return false unless $game_switches[
+              Object.const_get(:SWITCH_WILD_RANDOM_GLOBAL)
+            ]
           end
           Object.private_method_defined?(:getRandomizedTo) ||
             Object.method_defined?(:getRandomizedTo)
+        rescue StandardError
+          false
+        end
+
+        def area_mapping_enabled?
+          return false unless base_randomization_enabled?
+          return false unless Object.const_defined?(:SWITCH_RANDOM_WILD_AREA)
+          !!$game_switches[Object.const_get(:SWITCH_RANDOM_WILD_AREA)]
+        rescue StandardError
+          false
+        end
+
+        def base_randomization_enabled?
+          return false unless $game_switches
+          return false unless Object.const_defined?(:SWITCH_RANDOM_WILD)
+          !!$game_switches[Object.const_get(:SWITCH_RANDOM_WILD)]
         rescue StandardError
           false
         end

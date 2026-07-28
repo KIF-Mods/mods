@@ -14,12 +14,57 @@ Wild Link reads the current map's native encounter tables and supports:
 - Headbutt
 - Rock Smash
 
-Fishing requires an owned rod. Headbutt and Rock Smash are shown only when a
-compatible nearby map event and encounter table both exist. Wild Link is
-disabled in Safari, Bug Contest, partner, and non-map contexts.
+When KIF Pokemon randomization is enabled, Wild Link replaces the authored
+roster with the same effective roster used by normal encounters:
 
-Rock Smash requires the current map's dedicated `RockSmash` encounter table.
-It never borrows species from Cave or Land tables.
+- `Global` applies KIF's saved one-to-one species mapping to every authored
+  encounter slot.
+- `Area` reads the current map directly from KIF's saved
+  `GameData::EncounterRandom` table, preserving its randomized species,
+  weights, and level ranges.
+
+This lets randomized species fill the Wild Link discovery roster instead of
+continuing to show the map's original encounter species. Changing modes does
+not require Wild Link to retain a stale copy of the current map's old table.
+
+Land, alternate Land terrain, Cave, and Surf rosters use KIF's current
+Morning, Afternoon, Evening, Day, or Night encounter table with the same
+fallback order as native encounters. Reopening Wild Link after the time period
+changes shows the newly active table. Rare Signal selection remains map-wide
+and does not change with the time period.
+
+KIF's Static Encounter randomizer runs after a species has been selected for
+battle. Wild Link applies that same final mapping to Global, Area, Rare Signal,
+and generic Rock Smash fallback species before displaying or generating the
+target. If another system has compatibly extended the live Area encounter
+table, Wild Link keeps those additions instead of replacing the live table with
+the saved randomized table.
+
+Dynamic Pokemon is deliberately different. Its encounter result is rerolled
+after a table slot is selected, so those transient species are not recorded or
+added to Wild Link's roster. Wild Link continues to show only the stable Global
+or Area table that Dynamic Pokemon is rerolling from. Resolving a Wild Link
+roster never consumes a Dynamic Pokemon roll.
+
+KIF's `Randomize to Fusions` option is supported because those exact fusions
+are stored in the Global mapping or Area encounter table. KIF's separate
+chance-based and force-all wild fusion behavior runs after table selection and
+can produce an unbounded set of pairings, so Wild Link does not reroll a
+selected target through that step or add those transient pairings to its
+roster.
+
+Fishing requires both an owned rod and that rod's authored encounter table on
+the current map; KIF does not provide a generic fishing fallback. Surf is
+available from shore when the current map has a Water encounter table and the
+player can use Surf through a Pokemon or Surfboard. Headbutt requires a
+compatible nearby map event and encounter table. Rock Smash requires a nearby
+smash-rock event. Wild Link is disabled in Safari, Bug Contest, partner, and
+non-map contexts.
+
+Rock Smash uses the current map's dedicated `RockSmash` encounter table when
+one exists. Maps without an authored table use KIF's generic Geodude fallback
+at levels 5-14, including KIF's native Static Encounter randomization of that
+fallback species. It never borrows species from Cave or Land tables.
 
 ## Discovery
 
@@ -28,20 +73,28 @@ It never borrows species from Cave or Land tables.
 - Caught Pokemon use colored icons and unlock full scan details.
 - Search Level is permanent and stored per exact species or fusion.
 - Search Level is capped at 999.
-- Naturally encountered fusion identities are remembered per map and encounter
-  method, then added to that method's searchable roster.
-- Rare Signal uses KIF's native `Settings::POKE_RADAR_ENCOUNTERS` data.
+- Exact fusion identities supplied by the active Global or Area randomized
+  encounter table appear as normal searchable entries.
+- Rare Signal uses KIF's native `Settings::POKE_RADAR_ENCOUNTERS` data when
+  the current map has an authored Poké Radar species.
+- Maps without an authored rare species receive a deterministic fallback. Wild
+Link calculates the encounter-rate-weighted average BST of the effective
+  map-wide Land roster across all time periods, targets approximately 50 BST
+  above that average, excludes its normal species and legendaries, and chooses
+  from the twelve closest matches. The fallback uses the map's Land level range
+  and updates when its effective randomized encounter table changes.
 - Rare Signal unlocks after every standard Land encounter on the map has been
   seen.
 - An encountered Rare Signal species joins the normal searchable roster.
 
 ## Target Lifecycle
 
-Land, Cave, and Surf searches create one temporary overworld target. Fishing,
-Headbutt, and Rock Smash preserve their native field interactions and replace
-only the final matching encounter.
+Land and Cave searches create one temporary overworld target. Surf places a
+centered ripple on a surfable water tile and starts the prepared encounter when
+the player Surfs onto it. Fishing, Headbutt, and Rock Smash preserve their
+native field interactions and replace only the final matching encounter.
 
-Fishing marks its water tile with a centered ripple. Headbutt repeatedly
+Fishing also marks its water tile with a centered ripple. Headbutt repeatedly
 rustles the leaves of the affected native tree. Rock Smash traces the affected
 native rock sprite with a pulsing white outline. These field methods do not
 create Pokemon overworld sprites. Using Headbutt on the marked tree always
@@ -60,8 +113,8 @@ state are therefore preserved.
 
 ## Overworld Reactions
 
-Direct Land, Cave, and Surf targets transition between roaming and noticed
-states. Each transition into the noticed state plays one of KIF's native
+Direct Land and Cave targets transition between roaming and noticed states.
+Each transition into the noticed state plays one of KIF's native
 Hoenn-style reaction graphics:
 
 - Curious targets show a question mark, approach, observe the player, and may
@@ -92,19 +145,49 @@ the chain. Shiny targets never flee or distance-despawn.
 Declining the `Prompt` ends the current chain.
 Continuation waits for at least eight stable overworld updates after battle.
 
-The Wild Link scene shows the current Search Level and chain bonus preview for
-the selected Pokemon. The preview is calculated by the same helpers used to
-generate the target and includes level, shiny-roll, perfect-IV, Hidden Ability,
-Egg Move, and held-item bonuses. Unavailable species bonuses display `N/A`.
+`Input Z` switches the selected link's detail panel between `SL Info` and
+`Current Bonuses`. This works for inactive links and the current active target.
+The header shows separate Seen and Caught completion totals for the selected
+encounter method, including undiscovered Rare Signal species in its total.
+The SL page shows scan unlocks, or the generated target's unlocked level,
+temperament, exact perfect-IV count, held item, abilities, Egg Moves, and signal
+location. The bonus page is calculated by the same helpers used to generate the
+target and includes level, shiny-roll, guaranteed and chance-based perfect-IV,
+Hidden Ability, Egg Move, and held-item bonuses. Unavailable species bonuses
+display `N/A`.
+
+The active target's `Perfect IVs: X/6` value is its actual number of 31 IVs
+after native generation and Wild Link bonuses. It can therefore be higher than
+the guaranteed minimum shown on the bonus page.
 
 While a target or chain is active, `Action` in the Wild Link scene cancels the
 target and ends its chain after confirmation. The `Cancel Link` footer command
 can also be clicked with the mouse.
 
 `Messages` controls routine Wild Link prompts, warnings, and notifications.
-Turning it off automatically accepts normal search-flow confirmations. The
+Turning it off automatically accepts normal search-flow confirmations.
+Placement failures such as `No reachable target position was found nearby`
+always remain visible so the player knows why a search did not start. The
 configured `Continue Search` prompt and the destructive Search Level reset
-confirmation always remain available.
+confirmation also always remain available.
+
+Rare Signal rows and revealed rare-species rows are drawn in gold. Once a rare
+species has been seen, its separate Rare Signal is replaced by the species'
+normal Land roster row, which remains gold to identify it as that map's rare
+encounter.
+
+## Map Diagnostics
+
+`Gather Map Data` in Wild Link settings creates
+`KantoReloaded/Logging/WildLinkMapData.txt`, uploads the sanitized report,
+and copies a Discord-ready link when clipboard access is available. It does
+not open the Kanto Reloaded bug-report thread.
+
+The report snapshots the current map ID, name, dimensions, metadata, player
+map position and terrain, field tools, terrain-tag counts, map events, Wild
+Link method eligibility, and every active encounter table. It is intended for
+diagnosing missing Surf, Fishing, Headbutt, Rock Smash, Land, or Cave methods.
+The report does not include save contents or player identity.
 
 ## Scan Unlocks
 
@@ -308,5 +391,20 @@ The result is capped at KIF's normal maximum level.
 - KR Dynamic Pokemon intentionally does not reroll a selected Wild Link
   target. Dynamic rerolls wrap KIF's normal `choose_wild_pokemon` path, while
   Wild Link directly generates the species explicitly selected in its roster.
+- Wild Link uses the same demand-driven loading model as Reloaded PC. Only the
+  currently selected preview is requested, source graphics are reused through
+  KIF's native bitmap cache, and completed previews remain in a bounded KR
+  memory cache between Wild Link scene openings during the current game
+  session.
+- Wild Link does not generate an entire map roster or export preview PNGs while
+  the scene is open. A newly selected species can incur its normal first-load
+  cost, but stopping list navigation cannot trigger a bulk loading pass.
+- Missing standard fusion-icon previews are assembled with one lower-half
+  bitmap copy rather than KIF's per-pixel temporary-file generator. This path
+  is scoped to Wild Link previews and does not replace native PC, party, or
+  battle sprite behavior.
 - Fusion targets retain the exact fusion for battle and use the body Pokemon's
   dark silhouette in the overworld.
+- If a target species does not have an overworld follower graphic, Wild Link
+  uses Pikachu's overworld graphic. Unknown targets still render that fallback
+  as a fully black silhouette.

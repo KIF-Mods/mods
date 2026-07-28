@@ -42,6 +42,14 @@ module KantoReloaded
         false
       end
 
+      def runtime_config_version
+        @runtime_config_version ||= 0
+      end
+
+      def invalidate_runtime_config!
+        @runtime_config_version = runtime_config_version + 1
+      end
+
       def capability
         {
           :id => CAPABILITY_ID,
@@ -260,7 +268,8 @@ module KantoReloaded
         false
       end
 
-      def reconcile_evolution!(pokemon, previous_components)
+      def reconcile_evolution!(pokemon, previous_components,
+                               previous_pair = nil)
         return false unless initialized?(pokemon)
         return false if family_pokemon?(pokemon)
         current_components = component_data(pokemon)
@@ -277,18 +286,25 @@ module KantoReloaded
           current_components.length,
           [1, current_components.length - 1].min
         )
-        current_primary = primary_id(pokemon)
-        current_secondary = secondary_id(pokemon)
+        native_primary = primary_id(pokemon)
+        native_secondary = secondary_id(pokemon)
+        prior_ids = Array(previous_pair)
+        previous_primary = ability_id(prior_ids[0]) || native_primary
+        previous_secondary = if prior_ids.length >= 2
+                               ability_id(prior_ids[1])
+                             else
+                               native_secondary
+                             end
         primary_choices = evolution_slot_preferences(
           previous[primary_source],
           current_components[primary_source],
-          current_primary
+          previous_primary
         )
-        secondary_choices = if current_secondary
+        secondary_choices = if previous_secondary
                               evolution_slot_preferences(
                                 previous[secondary_source],
                                 current_components[secondary_source],
-                                current_secondary
+                                previous_secondary
                               )
                             else
                               [nil]
@@ -300,8 +316,8 @@ module KantoReloaded
           secondary_choices.each_with_index do |second, second_index|
             next unless pair_legal?(first, second)
             changes = 0
-            changes += 1 if first != current_primary
-            changes += 1 if second != current_secondary
+            changes += 1 if first != previous_primary
+            changes += 1 if second != previous_secondary
             legal_pairs << [
               changes,
               first_index + second_index,
@@ -316,7 +332,7 @@ module KantoReloaded
         selected = legal_pairs.min_by { |entry| entry[0, 4] }
         first = selected ? selected[4] : primary_choices[0]
         second = selected ? selected[5] : nil
-        changed = first != current_primary || second != current_secondary
+        changed = first != native_primary || second != native_secondary
         result = assign_pair!(
           pokemon,
           first,
@@ -478,6 +494,7 @@ module KantoReloaded
           :double_abilities_native_isolation,
           :owner => :double_abilities
         ) do |value, old_value, _definition|
+          invalidate_runtime_config!
           value_on = value == true || (value.respond_to?(:to_i) && value.to_i == 1)
           old_on = old_value == true ||
             (old_value.respond_to?(:to_i) && old_value.to_i == 1)

@@ -145,15 +145,19 @@ module KantoReloaded
           popup = KantoReloaded::PopupWindow
           @w = [[@options[:width].to_i, popup::MIN_W].max, popup::MAX_W].min
           @has_preview_row = preview_row?
+          @has_notice_row = notice_row?
           @label_present = !@options[:label].empty?
           @quantity_y = @label_present ? 49 : 27
           @unit_y = @label_present ? 25 : 21
           @preview_y = @label_present ? 49 : 38
-          @separator_y = if @has_preview_row
-                           @label_present ? 78 : 60
-                         else
-                           @quantity_y + 25
-                         end
+          base_separator_y = if @has_preview_row
+                               @label_present ? 78 : 60
+                             else
+                               @quantity_y + 25
+                             end
+          @notice_y = base_separator_y
+          @separator_y = @has_notice_row ?
+            base_separator_y + ROW_H + 2 : base_separator_y
           @choice_y = @separator_y + 8
           @h = @choice_y + CHOICE_H * choice_count + 10
           @x = (popup::SCREEN_W - @w) / 2
@@ -186,6 +190,7 @@ module KantoReloaded
           draw_item_row(bitmap) if @label_present
           draw_quantity_row(bitmap)
           draw_preview_row(bitmap) if @has_preview_row
+          draw_notice_row(bitmap) if @has_notice_row
           bitmap.fill_rect(
             14, @separator_y, @w - 28, 1,
             @theme[:border] || KantoReloaded::PopupWindow::DIM
@@ -224,6 +229,16 @@ module KantoReloaded
               ROW_H, preview_text, preview_color, 2
             )
           end
+        end
+
+        def draw_notice_row(bitmap)
+          notice_text, notice_color = notice
+          return if notice_text.empty?
+          plain_text(
+            bitmap, 14, @notice_y - 7, @w - 28,
+            ROW_H, fit_text(bitmap, notice_text, @w - 28),
+            notice_color, 1
+          )
         end
 
         def draw_choice_rows(bitmap)
@@ -325,6 +340,22 @@ module KantoReloaded
           ["", theme_text]
         end
 
+        def notice
+          value = @options[:notice]
+          value = value.call(@value) if value.respond_to?(:call)
+          return ["", theme_dim] if value.nil?
+          if value.is_a?(Hash)
+            return [
+              (value[:text] || value[:value]).to_s,
+              value[:color] || theme_dim
+            ]
+          end
+          return [value[0].to_s, value[1] || theme_dim] if value.is_a?(Array)
+          [value.to_s, theme_dim]
+        rescue StandardError
+          ["", theme_dim]
+        end
+
         def preview_color(value)
           color = @options[:preview_color]
           return color.call(value, @value) if color.respond_to?(:call)
@@ -355,6 +386,13 @@ module KantoReloaded
           @options[:show_unit_price] ||
             @options.has_key?(:unit_price) ||
             @options[:preview].respond_to?(:call)
+        rescue StandardError
+          false
+        end
+
+        def notice_row?
+          value = @options[:notice]
+          value.respond_to?(:call) || !value.to_s.empty?
         rescue StandardError
           false
         end
