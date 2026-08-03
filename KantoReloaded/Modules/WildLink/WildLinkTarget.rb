@@ -1284,14 +1284,21 @@ module KantoReloaded
           return nil unless current[:fusion]
           data = GameData::Species.get(current[:species])
           body = GameData::Species.get(data.get_body_species).id.to_s
-          folder = File.join(
-            KantoReloaded::ROOT, "Graphics", "Characters", "Followers",
-            "Fusions"
-          )
-          folder = File.join(folder, "Shiny") if current[:pokemon].shiny?
+          folder = "Fusions"
+          folder += "/Shiny" if current[:pokemon].shiny?
           [body, "#{body}_fly"].each do |name|
-            path = File.join(folder, "#{name}.png")
-            return runtime_asset_path(path) if File.file?(path)
+            relative = "#{folder}/#{name}.png"
+            path = if defined?(KantoReloaded::AssetPacks)
+                     KantoReloaded::AssetPacks.ensure_follower(relative)
+                   end
+            unless path && File.file?(path)
+              legacy = File.join(
+                KantoReloaded::ROOT, "Graphics", "Characters", "Followers",
+                relative
+              )
+              path = legacy if File.file?(legacy)
+            end
+            return runtime_asset_path(path) if path && File.file?(path)
           end
           nil
         rescue StandardError

@@ -427,6 +427,12 @@ The result is capped at KIF's normal maximum level.
   cache behavior as icon previews.
 - Fusion targets retain the exact fusion for battle and use the body Pokemon's
   dark silhouette in the overworld.
+- Normal and shiny fusion follower silhouettes are distributed in two standard
+  ZIP archives with `.pak` extensions under
+  `Graphics/Characters/Followers/Fusions`. They can be opened with ordinary ZIP
+  tools. Wild Link indexes a pack once, verifies entries with CRC32, and
+  extracts only the requested silhouette. `Tools/FollowerPacks.rb` can pack,
+  unpack, or verify both files.
 - If a target species does not have an overworld follower graphic, Wild Link
   uses Pikachu's overworld graphic. Unknown targets still render that fallback
   as a fully black silhouette.

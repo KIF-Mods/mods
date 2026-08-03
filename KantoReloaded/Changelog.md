@@ -1,7 +1,7 @@
 ══════════════════════════════════════════════
 KANTO RELOADED
 Update #4 - Shifting Skies
-v1.4.0
+v1.4.1
 Release Date: August 3, 2026
 ══════════════════════════════════════════════
 
@@ -38,6 +38,7 @@ AUDIO
 PERFORMANCE
 -----------
 • Removed first-open Wild Link stalls caused by constructing complete fusion battle data for roster rows; fusion names, Pokédex keys, and icon paths now use lightweight references, previews load only after active row focus, and completed scenes are presented immediately
+• Packed 2,302 Wild Link fusion follower graphics into two lazily opened ZIP-compatible `.pak` archives, reducing update file count while preserving on-demand normal and shiny silhouettes
 
 TECHNICAL
 ---------

@@ -7,6 +7,7 @@ module KantoReloaded
     FILES = [
       "Core/Foundation/Logging.rb",
       "Core/Foundation/Platform.rb",
+      "Core/Foundation/AssetPacks.rb",
       "Core/Foundation/GlobalSettings.rb",
       "Core/Foundation/Hooks.rb",
       "Core/Foundation/APIContracts.rb",
