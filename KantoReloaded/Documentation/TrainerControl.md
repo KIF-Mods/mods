@@ -139,11 +139,12 @@ excluded from the player-facing records UI. Existing records
 from legacy game variable 999 are imported once without changing the original
 variable.
 
-The separately managed `KRTrainerControlInspector` mod exposes archetypes,
-saved parties, ace and Pink Slips member markers, revisions, recent choices,
-bounded change history, Pink Slips roster operations, capture status, and
-pending transfers for development testing. It is not required by Kanto
-Reloaded and can be disabled or deleted when testing is complete.
+The separately managed `AdminControl` mod includes the Trainer Control
+Inspector. It exposes archetypes, saved parties, ace and Pink Slips member
+markers, revisions, recent choices, bounded change history, Pink Slips roster
+operations, capture status, and pending transfers for development testing. It
+is not required by Kanto Reloaded and can be disabled or deleted when testing
+is complete.
 
 ## Base Integration
 

@@ -598,10 +598,10 @@ module KantoReloaded
             character_sprite_for(current[:source_event])
           return unless source
           @headbutt_source_sprite = source
-          animation_id = if defined?(Settings::RUSTLE_NORMAL_ANIMATION_ID)
-                           Settings::RUSTLE_NORMAL_ANIMATION_ID
-                         elsif defined?(Settings::GRASS_ANIMATION_ID)
-                           Settings::GRASS_ANIMATION_ID
+          animation_id = if defined?(::Settings::RUSTLE_NORMAL_ANIMATION_ID)
+                           ::Settings::RUSTLE_NORMAL_ANIMATION_ID
+                         elsif defined?(::Settings::GRASS_ANIMATION_ID)
+                           ::Settings::GRASS_ANIMATION_ID
                          else
                            1
                          end

@@ -7,12 +7,16 @@ module KantoReloaded
     MODULE_ID = :wild_link
     STATE_KEY = :state
     SETTINGS_ACTION = :wild_link_settings
+    MAP_DATA_ACTION = :gather_map_data
     MESSAGES_SETTING = :"wild_link.messages"
     CONTINUE_SETTING = :"wild_link.continue_search"
+    SPRITES_SETTING = :"wild_link.sprites"
 
     CONTINUE_PROMPT = 0
     CONTINUE_AUTOMATIC = 1
     CONTINUE_OFF = 2
+    SPRITES_ICONS = 0
+    SPRITES_FULL = 1
     SEARCH_LEVEL_CAP = 999
 
     METHOD_LABELS = {
@@ -81,7 +85,18 @@ module KantoReloaded
       end
 
       def species_key(species)
-        GameData::Species.get(species).id.to_s
+        return species.to_i.to_s if species.is_a?(Integer)
+        text = species.to_s
+        match = text.match(/\AB(\d+)H(\d+)\z/)
+        if match
+          maximum = defined?(::Settings::NB_POKEMON) ?
+            ::Settings::NB_POKEMON.to_i : 0
+          return (
+            (match[1].to_i * maximum) + match[2].to_i
+          ).to_s if maximum > 0
+        end
+        data = GameData::Species.try_get(species)
+        data ? data.id.to_s : species.to_s
       rescue StandardError
         species.to_s
       end
@@ -148,6 +163,20 @@ module KantoReloaded
         ).to_i
       rescue StandardError
         CONTINUE_PROMPT
+      end
+
+      def sprite_mode
+        value = KantoReloaded::Settings.get(
+          SPRITES_SETTING, SPRITES_FULL
+        ).to_i
+        [SPRITES_ICONS, SPRITES_FULL].include?(value) ?
+          value : SPRITES_FULL
+      rescue StandardError
+        SPRITES_FULL
+      end
+
+      def full_sprites?
+        sprite_mode == SPRITES_FULL
       end
 
       def messages_enabled?

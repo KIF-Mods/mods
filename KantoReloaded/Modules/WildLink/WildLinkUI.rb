@@ -6,8 +6,10 @@ module KantoReloaded
   module WildLink
     module UI
       module PreviewCache
+        CACHE_VERSION = 3
         DESKTOP_LIMIT = 128
         JOIPLAY_LIMIT = 64
+        FULL_SPRITE_SIZE = 64
         class Entry
           attr_reader :frame_width
           attr_reader :frame_height
@@ -77,8 +79,7 @@ module KantoReloaded
             end
             @entries.delete(key)
             @order.delete(key)
-            preview = preview_pokemon(species)
-            entry = build_entry(species, preview)
+            entry = build_entry(species, context_signature[1])
             return nil unless entry
             @entries[key] = entry
             touch(key)
@@ -87,7 +88,6 @@ module KantoReloaded
           end
 
           def context_signature
-            system = defined?($PokemonSystem) ? $PokemonSystem : nil
             variables = defined?($game_variables) ? $game_variables : nil
             global = defined?($PokemonGlobal) ? $PokemonGlobal : nil
             substitutions = if global &&
@@ -95,18 +95,14 @@ module KantoReloaded
                               global.alt_sprite_substitutions
                             end
             [
-              system && system.respond_to?(:kuraybigicons) ?
-                system.kuraybigicons.to_i : 0,
-              system && system.respond_to?(:kurayindividcustomsprite) ?
-                system.kurayindividcustomsprite.to_i : 0,
-              system && system.respond_to?(:shiny_icons_kuray) ?
-                system.shiny_icons_kuray.to_i : 0,
+              CACHE_VERSION,
+              WildLink.sprite_mode,
               variables && defined?(VAR_FUSION_ICON_STYLE) ?
                 variables[VAR_FUSION_ICON_STYLE].to_i : 0,
               substitution_signature(substitutions)
             ]
           rescue StandardError
-            [0, 0, 0, 0, ""]
+            [CACHE_VERSION, SPRITES_FULL, 0, ""]
           end
 
           def clear
@@ -120,67 +116,160 @@ module KantoReloaded
 
           private
 
-          def preview_pokemon(species)
-            owner = defined?($Trainer) ? $Trainer : nil
-            preview = Pokemon.new(species, 5, owner, false)
-            preview.personalID = deterministic_personal_id(species) if
-              preview.respond_to?(:personalID=)
-            preview.shiny = false if preview.respond_to?(:shiny=)
-            preview.calc_stats if preview.respond_to?(:calc_stats)
-            preview
+          def build_entry(species, sprite_mode)
+            if sprite_mode.to_i == SPRITES_FULL
+              full_sprite = build_full_sprite_entry(species)
+              return full_sprite if full_sprite
+            end
+            dex_number = fusion_dex_number(species)
+            return build_fusion_species_entry(dex_number) if dex_number
+            data = GameData::Species.try_get(species)
+            return nil unless data
+            build_regular_species_entry(data)
           end
 
-          def build_entry(species, preview = nil)
-            preview ||= preview_pokemon(species)
-            composite = build_composite_fusion_entry(preview)
-            return composite if composite
-            icon = PokemonIconSprite.new(preview)
-            icon.x = 0
-            icon.y = 0
-            wrapped = icon.instance_variable_get(:@sprite)
-            animated = icon.instance_variable_get(:@animBitmap)
-            return nil unless animated && animated.bitmap
-            frame_width = [icon.src_rect.width.to_i, 1].max
-            frame_height = [icon.src_rect.height.to_i, 1].max
-            frame_count = [animated.bitmap.width / frame_width, 1].max
-            offset_x = wrapped ? wrapped.x.to_i : 0
-            offset_y = wrapped ? wrapped.y.to_i : 0
-            icon.instance_variable_set(:@animBitmap, nil)
-            icon.bitmap = nil
-            icon.dispose
-            icon = nil
+          def build_full_sprite_entry(species)
+            dex_number = fusion_dex_number(species)
+            unless dex_number
+              data = GameData::Species.try_get(species)
+              return nil unless data
+              dex_number = data.id_number
+            end
+            source = GameData::Species.sprite_bitmap_from_pokemon_id(
+              dex_number
+            )
+            return nil unless source && source.bitmap
+            bounds = visible_bounds(source.bitmap)
+            width = [bounds[2].to_i, 1].max
+            height = [bounds[3].to_i, 1].max
+            scale = [
+              FULL_SPRITE_SIZE.to_f / width,
+              FULL_SPRITE_SIZE.to_f / height,
+              2.0
+            ].min
+            target_width = [(width * scale).round, 1].max
+            target_height = [(height * scale).round, 1].max
+            result = Bitmap.new(target_width, target_height)
+            result.stretch_blt(
+              Rect.new(0, 0, target_width, target_height),
+              source.bitmap,
+              Rect.new(bounds[0], bounds[1], width, height)
+            )
+            animated = AnimatedBitmap.from_bitmap(result)
             Entry.new(
-              animated, frame_width, frame_height, frame_count,
-              offset_x, offset_y
+              animated, target_width, target_height, 1, 0, 0
             )
           rescue StandardError => e
-            WildLink.log_exception("Wild Link preview loading failed", e)
+            result.dispose if result && !result.disposed?
+            WildLink.log_exception(
+              "Wild Link full sprite loading failed", e
+            )
             nil
           ensure
-            icon.dispose if icon && !icon.disposed?
+            source.dispose if source && !source.disposed?
           end
 
-          def build_composite_fusion_entry(preview)
-            return nil if big_icon_mode?
-            dex_number = getDexNumberForSpecies(preview.species)
-            dex_number = GameData::Species.get(dex_number).id_number if
-              dex_number.is_a?(Symbol)
-            return nil if regular_icon?(preview.species, dex_number)
-            return nil if isTripleFusion?(dex_number)
-            return nil if custom_fusion_icon_path(dex_number)
-            body_number = getBodyID(preview.species)
-            head_number = getHeadID(preview.species, body_number)
+          def visible_bounds(bitmap)
+            width = bitmap.width.to_i
+            height = bitmap.height.to_i
+            return [0, 0, width, height] if width <= 0 || height <= 0
+            step = [[width, height].max / 96, 1].max
+            min_x = width
+            min_y = height
+            max_x = -1
+            max_y = -1
+            y = 0
+            while y < height
+              x = 0
+              while x < width
+                if bitmap.get_pixel(x, y).alpha.to_i > 0
+                  min_x = x if x < min_x
+                  min_y = y if y < min_y
+                  max_x = x if x > max_x
+                  max_y = y if y > max_y
+                end
+                x += step
+              end
+              y += step
+            end
+            return [0, 0, width, height] if max_x < 0 || max_y < 0
+            left = [min_x - step, 0].max
+            top = [min_y - step, 0].max
+            right = [max_x + step, width - 1].min
+            bottom = [max_y + step, height - 1].min
+            [left, top, right - left + 1, bottom - top + 1]
+          rescue StandardError
+            [0, 0, bitmap.width.to_i, bitmap.height.to_i]
+          end
+
+          def build_regular_species_entry(data)
+            path = GameData::Species.icon_filename(
+              data.species, data.form, nil, false, false, false
+            )
+            build_path_entry(path)
+          end
+
+          def build_fusion_species_entry(dex_number)
+            path = exact_fusion_icon_path(dex_number)
+            return build_path_entry(path) if path
+            build_composite_fusion_entry(dex_number)
+          end
+
+          def exact_fusion_icon_path(dex_number)
+            if isTripleFusion?(dex_number)
+              return pbResolveBitmap(
+                sprintf("Graphics/Icons/icon%d", dex_number)
+              ) || pbResolveBitmap("Graphics/Icons/iconDNA")
+            end
+            custom = custom_fusion_icon_path(dex_number)
+            return custom if custom
+            generated = pbResolveBitmap(
+              sprintf("Graphics/Icons/icon%03d", dex_number)
+            )
+            return generated if generated
+            cached = pbResolveBitmap(
+              sprintf(
+                "Graphics/Pokemon/FusionIcons/icon%03d",
+                dex_number
+              )
+            )
+            return cached if cached
+            nil
+          rescue StandardError
+            nil
+          end
+
+          def build_path_entry(path)
+            return nil unless path
+            animated = AnimatedBitmap.new(path)
+            unless animated.bitmap
+              animated.dispose
+              return nil
+            end
+            frame_height = [animated.bitmap.height.to_i, 1].max
+            frame_width = frame_height
+            frame_count = [
+              animated.bitmap.width.to_i / frame_width, 1
+            ].max
+            Entry.new(
+              animated, frame_width, frame_height, frame_count, 0, 0
+            )
+          rescue StandardError => e
+            animated.dispose if animated && !animated.disposed?
+            WildLink.log_exception("Wild Link icon loading failed", e)
+            nil
+          end
+
+          def build_composite_fusion_entry(dex_number)
+            body_number = getBodyID(dex_number)
+            head_number = getHeadID(dex_number, body_number)
             body_species = GameData::Species.get(body_number).species
             head_species = GameData::Species.get(head_number).species
             head = AnimatedBitmap.new(
-              GameData::Species.icon_filename(
-                head_species, preview.spriteform_head
-              )
+              GameData::Species.icon_filename(head_species, 0)
             )
             body = AnimatedBitmap.new(
-              GameData::Species.icon_filename(
-                body_species, preview.spriteform_body
-              )
+              GameData::Species.icon_filename(body_species, 0)
             )
             return nil unless head.bitmap && body.bitmap
             width = head.bitmap.width.to_i
@@ -189,8 +278,8 @@ module KantoReloaded
             result = Bitmap.new(width, height)
             result.blt(0, 0, head.bitmap, Rect.new(0, 0, width, height))
             start_y = height / 2
-            start_y += Settings::FUSION_ICON_SPRITE_OFFSET.to_i if
-              defined?(Settings::FUSION_ICON_SPRITE_OFFSET)
+            start_y += ::Settings::FUSION_ICON_SPRITE_OFFSET.to_i if
+              defined?(::Settings::FUSION_ICON_SPRITE_OFFSET)
             copy_width = [width, body.bitmap.width.to_i].min
             copy_height = [
               height - start_y, body.bitmap.height.to_i - start_y
@@ -219,22 +308,16 @@ module KantoReloaded
             body.dispose if body && !body.disposed?
           end
 
-          def big_icon_mode?
-            return false unless defined?($PokemonSystem) && $PokemonSystem
-            return false unless $PokemonSystem.respond_to?(:kuraybigicons)
-            [1, 2].include?($PokemonSystem.kuraybigicons.to_i)
+          def fusion_dex_number(species)
+            maximum = defined?(::Settings::NB_POKEMON) ?
+              ::Settings::NB_POKEMON.to_i : 0
+            return nil if maximum <= 0
+            return species if species.is_a?(Integer) && species > maximum
+            match = species.to_s.match(/\AB(\d+)H(\d+)\z/)
+            return nil unless match
+            (match[1].to_i * maximum) + match[2].to_i
           rescue StandardError
-            false
-          end
-
-          def regular_icon?(species, dex_number)
-            return true if dex_number.to_i <= Settings::NB_POKEMON
-            variables = defined?($game_variables) ? $game_variables : nil
-            return false unless variables
-            return true if variables[VAR_FUSION_ICON_STYLE].to_i != 0
-            pbResolveBitmap(sprintf("Graphics/Icons/icon%03d", dex_number)) != nil
-          rescue StandardError
-            false
+            nil
           end
 
           def custom_fusion_icon_path(dex_number)
@@ -277,16 +360,6 @@ module KantoReloaded
             else
               value.to_s
             end
-          end
-
-          def deterministic_personal_id(species)
-            value = 2_166_136_261
-            WildLink.species_key(species).each_byte do |byte|
-              value = ((value ^ byte) * 16_777_619) & 0xFFFFFFFF
-            end
-            value
-          rescue StandardError
-            0
           end
 
           def touch(key)
@@ -358,7 +431,11 @@ module KantoReloaded
 
       class << self
         def open
+          opened = false
           return false unless graphics_available?
+          return false if @opening
+          @opening = true
+          opened = true
           result = nil
           KantoReloaded::UI::Modal.with_modal do
             result = Scene.new.main
@@ -368,8 +445,11 @@ module KantoReloaded
           WildLink.log_exception("Wild Link UI failed", e)
           false
         ensure
-          KantoReloaded::UI::Modal.drain_input if
-            defined?(KantoReloaded::UI::Modal)
+          if opened
+            KantoReloaded::UI::Modal.drain_input if
+              defined?(KantoReloaded::UI::Modal)
+            @opening = false
+          end
         end
 
         private
@@ -396,6 +476,11 @@ module KantoReloaded
         VISIBLE_ROWS = (LIST_H - 12) / ROW_H
         ICON_CACHE_LIMIT = 40
         JOIPLAY_ICON_CACHE_LIMIT = 24
+        BACKGROUND_Z = 0
+        PANEL_Z = 1
+        CURSOR_Z = 2
+        CONTENT_Z = 3
+        ICON_Z = 4
         BG = Color.new(16, 20, 31)
         PANEL = Color.new(26, 32, 48)
         BORDER = Color.new(56, 79, 126)
@@ -416,18 +501,24 @@ module KantoReloaded
           @detail_icon_order = []
           @active_detail_icon = nil
           @active_detail_icon_cache_key = nil
+          @pending_detail_icon_entry = nil
+          @pending_detail_icon_frame = nil
+          @pending_detail_icon_key = nil
           @row_presentations = {}
           @icon_context_signature = PreviewCache.context_signature
         end
 
         def main
           setup
+          KantoReloaded::UI::Modal.drain_input if
+            defined?(KantoReloaded::UI::Modal)
           loop do
             Graphics.update
             Input.update
             @active_detail_icon.update if @active_detail_icon
             result = handle_input
             break if result == :close
+            process_pending_detail_icon
             draw_list_cursor if ((Graphics.frame_count rescue 0) % 4).zero?
           end
           @result
@@ -440,9 +531,11 @@ module KantoReloaded
         def setup
           @viewport = Viewport.new(0, 0, SCREEN_W, SCREEN_H)
           @viewport.z = 999_999
+          @viewport.visible = false
           @background = Sprite.new(@viewport)
           @background.bitmap = Bitmap.new(SCREEN_W, SCREEN_H)
           @background.bitmap.fill_rect(0, 0, SCREEN_W, SCREEN_H, BG)
+          @background.z = BACKGROUND_Z
           @header_sprite = BitmapSprite.new(SCREEN_W, HEADER_H, @viewport)
           @list_panel_sprite = BitmapSprite.new(LIST_W, LIST_H, @viewport)
           @list_cursor_sprite = BitmapSprite.new(
@@ -453,17 +546,33 @@ module KantoReloaded
           @footer_sprite = BitmapSprite.new(SCREEN_W, FOOTER_H, @viewport)
           @list_panel_sprite.x = LIST_X
           @list_panel_sprite.y = LIST_Y
-          @list_panel_sprite.z = @viewport.z + 1
-          @list_cursor_sprite.z = @viewport.z + 2
+          @header_sprite.z = PANEL_Z
+          @list_panel_sprite.z = PANEL_Z
+          @list_cursor_sprite.z = CURSOR_Z
           @list_sprite.x = LIST_X
           @list_sprite.y = LIST_Y
-          @list_sprite.z = @viewport.z + 3
+          @list_sprite.z = CONTENT_Z
           @detail_sprite.x = DETAIL_X
           @detail_sprite.y = LIST_Y
+          @detail_sprite.z = PANEL_Z
           @footer_sprite.y = SCREEN_H - FOOTER_H
+          @footer_sprite.z = PANEL_Z
           draw_list_panel
+          started_at = Time.now.to_f
           load_methods
+          elapsed = Time.now.to_f - started_at
+          if elapsed >= 0.25 && defined?(KantoReloaded::Log)
+            KantoReloaded::Log.warning(
+              format(
+                "Wild Link roster loading took %.3fs on map %d",
+                elapsed, WildLink.current_map_id
+              ),
+              :wild_link
+            )
+          end
           draw_all
+          refresh_detail_icon(@state.current) if @state
+          @viewport.visible = true
         end
 
         def load_methods(preferred_method = nil, preferred_species = nil)
@@ -503,6 +612,9 @@ module KantoReloaded
           draw_list
           draw_detail
           draw_footer
+        rescue StandardError => e
+          WildLink.log_exception("Wild Link scene redraw failed", e)
+          raise
         end
 
         def draw_list_panel
@@ -544,8 +656,8 @@ module KantoReloaded
             _INTL("Caught {1}/{2}", progress[:caught], total),
             GREEN, 2, 12
           )
-        rescue StandardError
-          nil
+        rescue StandardError => e
+          WildLink.log_exception("Wild Link header progress draw failed", e)
         end
 
         def draw_method_tabs(bitmap)
@@ -569,14 +681,14 @@ module KantoReloaded
           active = Runtime.target
           return unless active
           label = active[:unknown] ? _INTL("Rare Signal") :
-            GameData::Species.get(active[:species]).name
+            EncounterPools.species_name(active[:species])
           text(
             bitmap, 8, 51, SCREEN_W - 16, 18,
             _INTL("Active: {1} | Chain {2}", label, WildLink.runtime.chain),
             GREEN, 1, 13
           )
-        rescue StandardError
-          nil
+        rescue StandardError => e
+          WildLink.log_exception("Wild Link method tabs draw failed", e)
         end
 
         def draw_list
@@ -627,7 +739,7 @@ module KantoReloaded
             )
             return
           end
-          refresh_detail_icon(entry)
+          hide_detail_icon_for_other_entry(entry)
           name = presentation_for(entry)[:name]
           text(bitmap, 8, 8, DETAIL_W - 16, 22, name, WHITE, 1)
           if entry[:signal]
@@ -767,8 +879,8 @@ module KantoReloaded
               GRAY, 1, 12
             )
           end
-        rescue StandardError
-          nil
+        rescue StandardError => e
+          WildLink.log_exception("Wild Link bonus preview draw failed", e)
         end
 
         def percentage_or_na(value)
@@ -979,6 +1091,7 @@ module KantoReloaded
           pbPlayCursorSE rescue nil
           draw_list
           draw_detail
+          queue_detail_icon(@state.current)
         end
 
         def change_method(amount)
@@ -987,6 +1100,7 @@ module KantoReloaded
           pbPlayCursorSE rescue nil
           load_entries
           draw_all
+          queue_detail_icon(@state.current)
         end
 
         def update_mouse
@@ -1004,6 +1118,7 @@ module KantoReloaded
               load_entries
               pbPlayCursorSE rescue nil
               draw_all
+              queue_detail_icon(@state.current)
             end
             return :method
           end
@@ -1012,11 +1127,14 @@ module KantoReloaded
           local = (y - LIST_Y - 6) / ROW_H
           index = @state.scroll + local
           return nil if index < 0 || index >= @state.rows.length
-          if index != @state.index
+          changed = index != @state.index
+          if changed
             @state.select(index)
             draw_list
             draw_detail
           end
+          queue_detail_icon(@state.current) if
+            changed || !detail_icon_requested_for?(@state.current)
           :search
         end
 
@@ -1059,8 +1177,8 @@ module KantoReloaded
           return hide_active_detail_icon unless request
           presentation = presentation_for(entry)
           display_key = [
-            request[:key], presentation[:caught], entry[:signal],
-            request[:active_signal]
+            request[:key], presentation[:seen], presentation[:caught],
+            entry[:signal], request[:active_signal]
           ]
           if @detail_icon_key == display_key && @active_detail_icon
             touch_detail_icon(request[:key])
@@ -1073,12 +1191,74 @@ module KantoReloaded
           @active_detail_icon_cache_key = request[:key]
           @detail_icon_key = display_key
           icon.visible = true
-          if entry[:signal] || !presentation[:caught]
+          if entry[:signal] ||
+             (!presentation[:seen] && !presentation[:caught])
             icon.color = Color.new(0, 0, 0, 255)
           else
             icon.color = Color.new(0, 0, 0, 0)
           end
+        rescue StandardError => e
+          WildLink.log_exception("Wild Link detail icon refresh failed", e)
+          hide_active_detail_icon
+        end
+
+        def queue_detail_icon(entry)
+          request = detail_icon_request(entry)
+          return hide_active_detail_icon unless request
+          presentation = presentation_for(entry)
+          display_key = [
+            request[:key], presentation[:seen], presentation[:caught],
+            entry[:signal], request[:active_signal]
+          ]
+          if @detail_icon_key == display_key && @active_detail_icon
+            @pending_detail_icon_entry = nil
+            @pending_detail_icon_frame = nil
+            @pending_detail_icon_key = nil
+            touch_detail_icon(request[:key])
+            return
+          end
+          hide_active_detail_icon
+          @pending_detail_icon_entry = entry
+          @pending_detail_icon_frame = Graphics.frame_count rescue 0
+          @pending_detail_icon_key = display_key
+        rescue StandardError => e
+          WildLink.log_exception("Wild Link detail icon queue failed", e)
+          hide_active_detail_icon
+        end
+
+        def process_pending_detail_icon
+          entry = @pending_detail_icon_entry
+          return unless entry
+          queued_at = @pending_detail_icon_frame.to_i
+          current_frame = Graphics.frame_count rescue queued_at
+          return if current_frame - queued_at < 2
+          @pending_detail_icon_entry = nil
+          @pending_detail_icon_frame = nil
+          @pending_detail_icon_key = nil
+          refresh_detail_icon(entry)
+        rescue StandardError => e
+          @pending_detail_icon_entry = nil
+          @pending_detail_icon_frame = nil
+          @pending_detail_icon_key = nil
+          WildLink.log_exception("Wild Link deferred preview failed", e)
+        end
+
+        def detail_icon_requested_for?(entry)
+          request = detail_icon_request(entry)
+          return false unless request
+          presentation = presentation_for(entry)
+          display_key = [
+            request[:key], presentation[:seen], presentation[:caught],
+            entry[:signal], request[:active_signal]
+          ]
+          @detail_icon_key == display_key ||
+            @pending_detail_icon_key == display_key
         rescue StandardError
+          false
+        end
+
+        def hide_detail_icon_for_other_entry(entry)
+          return if detail_icon_requested_for?(entry)
           hide_active_detail_icon
         end
 
@@ -1107,9 +1287,13 @@ module KantoReloaded
           entry = PreviewCache.fetch(species, @icon_context_signature)
           return nil unless entry
           icon = PreviewIconSprite.new(entry, @viewport)
-          icon.x = DETAIL_X + (DETAIL_W - 64) / 2 + entry.offset_x
-          icon.y = LIST_Y + 55 + entry.offset_y
-          icon.z = @viewport.z + 3
+          icon.x = DETAIL_X +
+                   (DETAIL_W - entry.frame_width) / 2 +
+                   entry.offset_x
+          icon.y = LIST_Y + 55 +
+                   (PreviewCache::FULL_SPRITE_SIZE - entry.frame_height) / 2 +
+                   entry.offset_y
+          icon.z = ICON_Z
           icon.visible = false
           @detail_icons[key] = icon
           touch_detail_icon(key)
@@ -1158,10 +1342,16 @@ module KantoReloaded
           @active_detail_icon = nil
           @active_detail_icon_cache_key = nil
           @detail_icon_key = nil
+          @pending_detail_icon_entry = nil
+          @pending_detail_icon_frame = nil
+          @pending_detail_icon_key = nil
         rescue StandardError
           @active_detail_icon = nil
           @active_detail_icon_cache_key = nil
           @detail_icon_key = nil
+          @pending_detail_icon_entry = nil
+          @pending_detail_icon_frame = nil
+          @pending_detail_icon_key = nil
         end
 
         def build_row_presentations
@@ -1199,7 +1389,8 @@ module KantoReloaded
               :searchable => signal ? !!entry[:unlocked] : seen
             }
           end
-        rescue StandardError
+        rescue StandardError => e
+          WildLink.log_exception("Wild Link row presentation build failed", e)
           @row_presentations = {}
         end
 
@@ -1237,7 +1428,8 @@ module KantoReloaded
             :caught => caught,
             :total => total
           }
-        rescue StandardError
+        rescue StandardError => e
+          WildLink.log_exception("Wild Link completion counter build failed", e)
           @method_completion = nil
         end
 
@@ -1400,6 +1592,7 @@ module KantoReloaded
 
       def pbGetOptions(_inloadscreen = false)
         rows = []
+        rows << setting_row(SPRITES_SETTING)
         rows << setting_row(MESSAGES_SETTING)
         rows << setting_row(CONTINUE_SETTING)
         rows << KantoReloaded::Options::TextDisplayOption.new(
@@ -1416,11 +1609,6 @@ module KantoReloaded
           _INTL("Chain Scope"),
           proc { _INTL("Pokemon / Method / Map") },
           _INTL("Changing the Pokemon, method, or map ends the active chain.")
-        )
-        rows << KantoReloaded::Options::ActionButton.new(
-          _INTL("Gather Map Data"),
-          proc { KantoReloaded::WildLink::MapData.file },
-          _INTL("Create and upload Wild Link diagnostics for the current map.")
         )
         rows << KantoReloaded::Options::ActionButton.new(
           _INTL("Reset Search Levels"),

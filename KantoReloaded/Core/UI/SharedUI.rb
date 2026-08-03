@@ -361,7 +361,8 @@ module KantoReloaded
         end
 
         def choice(title, commands, options = {})
-          open(:choice, title, Array(commands), options)
+          result = open(:choice, title, Array(commands), options)
+          result == -1 ? nil : result
         end
 
         def command(title, commands, options = {})
@@ -370,9 +371,13 @@ module KantoReloaded
 
         def carousel(title, entries, options = {})
           rows = Array(entries)
-          return -1 if rows.empty?
-          return fallback(:choice, title, rows) unless graphics_available?
-          Modal.with_modal { CarouselScene.new(title, rows, options).main }
+          return nil if rows.empty?
+          result = if graphics_available?
+                     Modal.with_modal { CarouselScene.new(title, rows, options).main }
+                   else
+                     fallback(:choice, title, rows)
+                   end
+          result == -1 ? nil : result
         rescue StandardError => e
           KantoReloaded::Log.exception("Shared UI carousel failed", e, channel: :ui) if defined?(KantoReloaded::Log)
           fallback(:choice, title, rows || [])
@@ -382,9 +387,13 @@ module KantoReloaded
 
         def paged_summary(title, pages, options = {})
           entries = Array(pages)
-          return -1 if entries.empty?
-          return fallback(:choice, title, entries) unless graphics_available?
-          Modal.with_modal { PagedSummaryScene.new(title, entries, options).main }
+          return nil if entries.empty?
+          result = if graphics_available?
+                     Modal.with_modal { PagedSummaryScene.new(title, entries, options).main }
+                   else
+                     fallback(:choice, title, entries)
+                   end
+          result == -1 ? nil : result
         rescue StandardError => e
           KantoReloaded::Log.exception("Shared UI paged summary failed", e, channel: :ui) if defined?(KantoReloaded::Log)
           fallback(:choice, title, entries || [])
@@ -427,9 +436,9 @@ module KantoReloaded
             return selected[:value] if selected.is_a?(Hash) && selected.has_key?(:value)
             return index
           end
-          kind == :choice ? -1 : nil
+          nil
         rescue
-          kind == :choice ? -1 : nil
+          nil
         end
       end
 

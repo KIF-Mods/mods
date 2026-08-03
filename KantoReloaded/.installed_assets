@@ -60,3 +60,26 @@ Graphics/Windowskins/RLD Choice 9.png
 Graphics/Windowskins/RLD Choice 9a.png
 Graphics/Windowskins/default_opaque.png
 Graphics/Windowskins/default_transparent.png
+Audio/BGS/KR_Weather_HeavyRain.wav
+Audio/BGS/KR_Weather_Rain.wav
+Audio/BGS/KR_Weather_Storm.wav
+Audio/SE/KR_Weather_Thunder1.wav
+Audio/SE/KR_Weather_Thunder2.wav
+Graphics/Pictures/Weather/mapBlizzard.png
+Graphics/Pictures/Weather/mapClear.png
+Graphics/Pictures/Weather/mapFog_heavy.png
+Graphics/Pictures/Weather/mapFog_light.png
+Graphics/Pictures/Weather/mapFog_medium.png
+Graphics/Pictures/Weather/mapHeavyRain.png
+Graphics/Pictures/Weather/mapRain_heavy.png
+Graphics/Pictures/Weather/mapRain_light.png
+Graphics/Pictures/Weather/mapRain_medium.png
+Graphics/Pictures/Weather/mapSand.png
+Graphics/Pictures/Weather/mapSnow.png
+Graphics/Pictures/Weather/mapStorm_heavy.png
+Graphics/Pictures/Weather/mapStorm_light.png
+Graphics/Pictures/Weather/mapStorm_medium.png
+Graphics/Pictures/Weather/mapStrongWinds.png
+Graphics/Pictures/Weather/mapSun_heavy.png
+Graphics/Pictures/Weather/mapSun_light.png
+Graphics/Pictures/Weather/mapSun_medium.png

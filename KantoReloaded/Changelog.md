@@ -1,5 +1,54 @@
 ══════════════════════════════════════════════
 KANTO RELOADED
+Update #4 - Shifting Skies
+v1.4.0
+Release Date: August 3, 2026
+══════════════════════════════════════════════
+
+SUMMARY
+-------
+This update introduces persistent regional weather and forecasting with battle integration, custom ambience, and multiplayer safeguards while improving Wild Link previews and Overworld Menu responsiveness.
+
+FEATURES
+--------
+• Added a regional Weather System with persistent climate-based or fully random weather cells, weather forecasts, Overworld Menu forecast views, and battle-weather integration
+• Added a global Wild Link Sprites option for switching detail previews between Pokémon icons and full battle sprites
+
+IMPROVEMENTS
+------------
+• Improved the Overworld Menu so map graphics and world-time updates continue while the overlay and its popups are open
+• Improved Wild Link opening so the initially selected row's Pokémon preview is loaded before the completed scene becomes visible
+
+BUG FIXES
+---------
+• Fixed authored Wild Link Rare Signals being remapped by encounter and Static Encounter randomization instead of matching the live Poké Radar-exclusive species
+• Fixed Wild Link invoking KIF's popup-producing battle randomizer while building roster rows; static encounter results are now resolved directly without repeated error prompts
+• Fixed Wild Link repeatedly presenting stale loading frames and requiring additional button presses before the completed scene appeared
+• Fixed Wild Link fusion previews collapsing to the shared icon 000 placeholder and Seen species remaining black silhouettes
+• Fixed Wild Link detail previews inheriting Big Icons, miscomposing valid species with fallback fusion components, shrinking unintended full battle sprites into icon-sized space, failing to resolve exact fusion icons, and allowing invalid species to display KIF's Pikachu fallback; previews now use Pokémon icon assets by default
+
+VISUALS & UI
+------------
+• Added non-pausing upper-left alerts for local Weather System changes
+
+AUDIO
+-----
+• Added optional continuous rain, storm, and heavy-rain ambience to the Weather System with randomized thunder timing and independent rain and thunder audio toggles
+
+PERFORMANCE
+-----------
+• Removed first-open Wild Link stalls caused by constructing complete fusion battle data for roster rows; fusion names, Pokédex keys, and icon paths now use lightweight references, previews load only after active row focus, and completed scenes are presented immediately
+
+TECHNICAL
+---------
+• Added guarded PvP weather negotiation that synchronizes initiator battle weather only when both clients confirm Kanto Reloaded support and suppresses unsynchronized local weather in co-op
+
+DEVELOPER
+---------
+• Added a data-only Weather System map override registry for eligibility, cell grouping, climate, and forecast-label exceptions
+
+══════════════════════════════════════════════
+KANTO RELOADED
 Update #3 - Signals & Supplies
 v1.3.2
 Release Date: July 27, 2026

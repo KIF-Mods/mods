@@ -9,6 +9,7 @@ module KantoReloaded
       EBDX_FIGHT_BORDER_IVAR = :@kanto_reloaded_move_effectiveness_border
       EBDX_FIGHT_SIGNATURE_IVAR = :@kanto_reloaded_move_effectiveness_signature
       EBDX_TARGET_BORDERS_IVAR = :@kanto_reloaded_move_effectiveness_borders
+      EBDX_TARGET_BORDER_SIZES_IVAR = :@kanto_reloaded_move_effectiveness_border_sizes
       EBDX_TARGET_VISIBLE_IVAR = :@kanto_reloaded_move_effectiveness_target_visible
       EBDX_TARGET_TEXTS_IVAR = :@kanto_reloaded_move_effectiveness_target_texts
       NATIVE_FIGHT_BORDER_KEY = "kr_move_effectiveness_border"
@@ -20,9 +21,8 @@ module KantoReloaded
         def install
           return true if @installed
           scene = install_scene_context_hook
-          native = install_native_hooks
           ebdx = install_ebdx_hooks
-          @installed = scene && (native || ebdx)
+          @installed = scene && ebdx
           @installed
         rescue StandardError => e
           log_exception("Battle border hooks failed to install", e)
@@ -31,7 +31,9 @@ module KantoReloaded
 
         def with_target_context(scene, idx_user)
           windows = target_windows(scene)
-          context = build_target_context(scene, idx_user)
+          context = if KantoReloaded::MoveEffectiveness.enabled?
+                      build_target_context(scene, idx_user)
+                    end
           windows.each { |window| window.instance_variable_set(CONTEXT_IVAR, context) }
           yield
         ensure
@@ -239,36 +241,60 @@ module KantoReloaded
         end
 
         def refresh_ebdx_targets(window, texts = nil)
-          dispose_ebdx_target_borders(window)
           window.instance_variable_set(EBDX_TARGET_TEXTS_IVAR, Array(texts))
           context = window.instance_variable_get(CONTEXT_IVAR)
           effectiveness_enabled = context &&
             KantoReloaded::MoveEffectiveness.enabled?
           cursor_enabled = reloaded_cursor?
-          return false unless effectiveness_enabled || cursor_enabled
+          unless effectiveness_enabled || cursor_enabled
+            hide_ebdx_target_borders(window)
+            return false
+          end
           buttons = window.instance_variable_get(:@buttons)
           return false unless buttons.is_a?(Hash)
-          borders = {}
+          borders = window.instance_variable_get(EBDX_TARGET_BORDERS_IVAR)
+          borders = {} unless borders.is_a?(Hash)
+          sizes = window.instance_variable_get(EBDX_TARGET_BORDER_SIZES_IVAR)
+          sizes = {} unless sizes.is_a?(Hash)
+          used = {}
           buttons.each do |key, button|
             index = key.to_i
-            next if Array(texts)[index].nil?
+            key = key.to_s
+            if Array(texts)[index].nil?
+              borders[key].visible = false if borders[key]
+              next
+            end
             color = effectiveness_enabled ? target_color(context, index) : nil
             color ||= KantoReloaded::BattleUI.cursor_border_color if cursor_enabled
             next unless button && color
-            border = BorderSprite.new(
-              window.instance_variable_get(:@viewport),
-              button.src_rect.width,
-              button.src_rect.height,
-              :padding => 0, :radius => 4, :border_width => 3, :pulse => true
-            )
+            size = [button.src_rect.width.to_i, button.src_rect.height.to_i]
+            border = borders[key]
+            if border && sizes[key] != size
+              border.dispose unless border.disposed?
+              border = nil
+            end
+            unless border
+              border = BorderSprite.new(
+                window.instance_variable_get(:@viewport),
+                size[0], size[1],
+                :padding => 0, :radius => 4,
+                :border_width => 3, :pulse => true
+              )
+              borders[key] = border
+              sizes[key] = size
+            end
             border.z = button.z + 1
             border.apply(color)
             border.follow(button)
             border.y -= 2
             border.visible = false
-            borders[key.to_s] = border
+            used[key] = true
+          end
+          borders.each do |key, border|
+            border.visible = false unless used[key]
           end
           window.instance_variable_set(EBDX_TARGET_BORDERS_IVAR, borders)
+          window.instance_variable_set(EBDX_TARGET_BORDER_SIZES_IVAR, sizes)
           true
         rescue StandardError => e
           log_exception("EBDX target borders refresh failed", e)
@@ -297,6 +323,7 @@ module KantoReloaded
             border.dispose if border && !border.disposed?
           end
           window.instance_variable_set(EBDX_TARGET_BORDERS_IVAR, {})
+          window.instance_variable_set(EBDX_TARGET_BORDER_SIZES_IVAR, {})
           true
         rescue StandardError
           false
@@ -349,7 +376,6 @@ module KantoReloaded
         def install_scene_context_hook
           return false unless defined?(KantoReloaded::Hooks)
           targets = []
-          targets << [PokeBattle_Scene, :native] if defined?(PokeBattle_Scene)
           if defined?(PokeBattle_SceneEBDX)
             targets << [PokeBattle_SceneEBDX, :ebdx]
           end

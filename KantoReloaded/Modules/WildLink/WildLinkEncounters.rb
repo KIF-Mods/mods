@@ -54,7 +54,15 @@ module KantoReloaded
         def entry_name(entry)
           return _INTL("Rare Signal") if entry[:signal]
           return _INTL("Unknown Pokemon") unless WildLink.seen?(entry[:species])
-          GameData::Species.get(entry[:species]).name
+          species_name(entry[:species])
+        rescue StandardError
+          _INTL("Unknown Pokemon")
+        end
+
+        def species_name(species)
+          number = fusion_number(species)
+          return fusion_name(number) if number
+          GameData::Species.get(species).name
         rescue StandardError
           _INTL("Unknown Pokemon")
         end
@@ -299,17 +307,17 @@ module KantoReloaded
           records = []
           encounter_types.each do |encounter_type|
             if encounter_type == ROCK_SMASH_FALLBACK
-              species = native_static_randomized_species(:GEODUDE)
+              species = static_mapped_species(mapped_species(:GEODUDE))
               records << [
                 100, species, 5, 14, ROCK_SMASH_FALLBACK
-              ] if species && GameData::Species.exists?(species)
+              ] if valid_species_reference?(species)
               next
             end
             table = effective_encounter_table(encounter_type)
             Array(table).each do |record|
               next unless record.is_a?(Array) && record.length >= 4
               species = effective_table_species(record[1])
-              next unless species && GameData::Species.exists?(species)
+              next unless valid_species_reference?(species)
               records << [
                 record[0].to_i, species, record[2].to_i, record[3].to_i,
                 encounter_type
@@ -319,38 +327,45 @@ module KantoReloaded
           records
         end
 
-        def native_static_randomized_species(source_species)
-          species = GameData::Species.get(source_species).id
-          method_name = :pbKurayRandomize
+        def effective_table_species(species)
+          static_mapped_species(mapped_species(species))
+        end
+
+        def static_mapped_species(source_species)
+          species = canonical_species_reference(source_species)
+          return nil unless species
+          return species unless static_randomization_enabled?
+          return species if fusion_number(species)
+          return species if $PokemonTemp && $PokemonTemp.pokeradar
+          dex_number = getDexNumberForSpecies(species)
+          maximum = defined?(::Settings::NB_POKEMON) ?
+            ::Settings::NB_POKEMON.to_i : 0
+          return species if dex_number.to_i <= 0 ||
+                            dex_number.to_i > maximum
+          method_name = :getRandomizedTo
           available = Object.private_method_defined?(method_name) ||
+                      Object.protected_method_defined?(method_name) ||
                       Object.method_defined?(method_name)
           return species unless available
-          receiver = Object.new
-          dynamic = if defined?(KantoReloaded::Randomizer::DynamicPokemon)
-                      KantoReloaded::Randomizer::DynamicPokemon
-                    end
-          randomized = if dynamic &&
-                          dynamic.respond_to?(:without_dynamic_randomization)
-                         dynamic.without_dynamic_randomization do
-                           receiver.__send__(method_name, species)
-                         end
-                       else
-                         receiver.__send__(method_name, species)
-                       end
-          randomized ? GameData::Species.get(randomized).id : species
+          mapped = Object.new.__send__(method_name, species)
+          canonical_species_reference(mapped) || species
         rescue StandardError => e
           WildLink.log_exception(
-            "Wild Link static encounter randomization failed", e
+            "Wild Link static encounter mapping failed", e
           )
           species || source_species
         end
 
-        def effective_table_species(species)
-          native_static_randomized_species(mapped_species(species))
-        end
-
-        def effective_rare_species(species)
-          native_static_randomized_species(mapped_species(species))
+        def static_randomization_enabled?
+          return false unless $game_switches
+          return false unless Object.const_defined?(
+            :SWITCH_RANDOM_STATIC_ENCOUNTERS
+          )
+          !!$game_switches[
+            Object.const_get(:SWITCH_RANDOM_STATIC_ENCOUNTERS)
+          ]
+        rescue StandardError
+          false
         end
 
         def effective_encounter_table(encounter_type)
@@ -444,6 +459,7 @@ module KantoReloaded
           map_entries = map_wide_land_entries
           rare = rare_records(map_entries)
           return entries if rare.empty?
+          return entries unless standard_seen_for_method?(entries)
           rare.each do |record|
             species = rare_record_species(record)
             next unless WildLink.seen?(species)
@@ -470,7 +486,7 @@ module KantoReloaded
           entries << {
             :species => rare_record_species(unseen[0]),
             :signal => true,
-            :unlocked => standard_seen_for_method?(map_entries),
+            :unlocked => true,
             :rare_records => unseen,
             :min_level => unseen.map { |record| record[3].to_i }.min,
             :max_level => unseen.map { |record| (record[4] || record[3]).to_i }.max
@@ -479,18 +495,43 @@ module KantoReloaded
         end
 
         def rare_records(entries = [])
-          authored = if defined?(Settings::POKE_RADAR_ENCOUNTERS)
-                       Array(Settings::POKE_RADAR_ENCOUNTERS).select do |record|
-                         record.is_a?(Array) &&
-                           record[0].to_i == WildLink.current_map_id &&
-                           GameData::Species.exists?(record[2])
-                       end
-                     else
-                       []
-                     end
+          authored = authored_rare_records
           return authored unless authored.empty?
           fallback = fallback_rare_record(entries)
           fallback ? [fallback] : []
+        rescue StandardError
+          []
+        end
+
+        def authored_rare_records
+          return [] unless defined?(::Settings::POKE_RADAR_ENCOUNTERS)
+          records = Array(::Settings::POKE_RADAR_ENCOUNTERS).select do |record|
+            record.is_a?(Array) &&
+              record[0].to_i == WildLink.current_map_id &&
+              !GameData::Species.try_get(record[2]).nil?
+          end
+          live_species = live_pokeradar_rare_species
+          return records if live_species.empty?
+          records.each_with_index.map do |record, index|
+            data = GameData::Species.try_get(live_species[index])
+            next record unless data
+            effective = record.dup
+            effective[2] = data.id
+            effective
+          end
+        rescue StandardError
+          []
+        end
+
+        def live_pokeradar_rare_species
+          method_name = :listPokeradarRareEncounters
+          available = Object.private_method_defined?(method_name) ||
+                      Object.protected_method_defined?(method_name) ||
+                      Object.method_defined?(method_name)
+          return [] unless available
+          Array(Object.new.__send__(method_name)).select do |species|
+            !GameData::Species.try_get(species).nil?
+          end
         rescue StandardError
           []
         end
@@ -503,12 +544,9 @@ module KantoReloaded
         end
 
         def rare_record_species(record)
-          species = record[2]
-          return GameData::Species.get(species).id if
-            record[5] == :wild_link_effective
-          effective_rare_species(species)
+          canonical_species_reference(record[2])
         rescue StandardError
-          species
+          nil
         end
 
         def fallback_rare_record(entries)
@@ -558,8 +596,8 @@ module KantoReloaded
 
         def fallback_species_pool
           return @fallback_species_pool if @fallback_species_pool
-          maximum = if defined?(Settings::NB_POKEMON)
-                      Settings::NB_POKEMON.to_i
+          maximum = if defined?(::Settings::NB_POKEMON)
+                      ::Settings::NB_POKEMON.to_i
                     elsif defined?(NB_POKEMON)
                       NB_POKEMON.to_i
                     else
@@ -584,6 +622,11 @@ module KantoReloaded
           key = WildLink.species_key(species)
           return @fallback_species_bst[key] if
             @fallback_species_bst.has_key?(key)
+          number = fusion_number(species)
+          if number
+            @fallback_species_bst[key] = fusion_bst(number)
+            return @fallback_species_bst[key]
+          end
           stats = GameData::Species.get(species).base_stats
           total = [
             :HP, :ATTACK, :DEFENSE,
@@ -595,22 +638,53 @@ module KantoReloaded
           nil
         end
 
+        def fusion_bst(number)
+          body_number = getBodyID(number)
+          head_number = getHeadID(number, body_number)
+          body = GameData::Species.get(body_number).base_stats
+          head = GameData::Species.get(head_number).base_stats
+          head_dominant = [:HP, :SPECIAL_ATTACK, :SPECIAL_DEFENSE]
+          body_dominant = [:ATTACK, :DEFENSE, :SPEED]
+          total = 0
+          head_dominant.each do |stat|
+            total += fused_stat(head[stat], body[stat])
+          end
+          body_dominant.each do |stat|
+            total += fused_stat(body[stat], head[stat])
+          end
+          total
+        rescue StandardError
+          nil
+        end
+
+        def fused_stat(dominant, other)
+          ((2 * dominant.to_i) / 3) + (other.to_i / 3).floor
+        end
+
         def fallback_legendary?(species)
           @fallback_legendary ||= {}
-          number = GameData::Species.get(species).id_number.to_i
+          data = GameData::Species.get(species)
+          number = data.id_number.to_i
           return @fallback_legendary[number] if
             @fallback_legendary.has_key?(number)
-          value = if Object.private_method_defined?(:is_legendary)
-                    Object.new.send(:is_legendary, number)
-                  elsif Object.method_defined?(:is_legendary)
-                    Object.new.send(:is_legendary, number)
-                  else
-                    false
-                  end
-          @fallback_legendary[number] = !!value
+          @fallback_legendary[number] =
+            fallback_legendary_species.has_key?(data.id)
         rescue StandardError
           @fallback_legendary[number] = false if number
           false
+        end
+
+        def fallback_legendary_species
+          return @fallback_legendary_species if @fallback_legendary_species
+          values = {}
+          source = defined?(::LEGENDARIES_LIST) ? ::LEGENDARIES_LIST : []
+          Array(source).each do |species|
+            data = GameData::Species.try_get(species)
+            values[data.id] = true if data
+          end
+          @fallback_legendary_species = values.freeze
+        rescue StandardError
+          @fallback_legendary_species = {}.freeze
         end
 
         def fallback_rare_seed(entries, average)
@@ -631,13 +705,77 @@ module KantoReloaded
         end
 
         def mapped_species(species)
-          id = GameData::Species.get(species).id
+          id = canonical_species_reference(species)
+          return nil unless id
           return id unless global_mapping_enabled?
           receiver = Object.new
           mapped = receiver.__send__(:getRandomizedTo, id)
-          mapped ? GameData::Species.get(mapped).id : id
+          canonical_species_reference(mapped) || id
         rescue StandardError
           id || species
+        end
+
+        def canonical_species_reference(species)
+          return nil if species.nil?
+          number = fusion_number(species)
+          return number if number
+          data = GameData::Species.try_get(species)
+          data && data.id
+        rescue StandardError
+          nil
+        end
+
+        def valid_species_reference?(species)
+          return false if species.nil?
+          number = fusion_number(species)
+          if number
+            body_number = getBodyID(number)
+            head_number = getHeadID(number, body_number)
+            return false if body_number <= 0 || head_number <= 0
+            return !GameData::Species.try_get(body_number).nil? &&
+                   !GameData::Species.try_get(head_number).nil?
+          end
+          !GameData::Species.try_get(species).nil?
+        rescue StandardError
+          false
+        end
+
+        def fusion_number(species)
+          maximum = defined?(::Settings::NB_POKEMON) ?
+            ::Settings::NB_POKEMON.to_i : 0
+          return nil if maximum <= 0
+          if species.is_a?(Integer)
+            return nil if species <= maximum
+            return nil if isTripleFusion?(species)
+            return species
+          end
+          match = species.to_s.match(/\AB(\d+)H(\d+)\z/)
+          return nil unless match
+          (match[1].to_i * maximum) + match[2].to_i
+        rescue StandardError
+          nil
+        end
+
+        def fusion_name(number)
+          body_number = getBodyID(number)
+          head_number = getHeadID(number, body_number)
+          mapping = defined?(GameData::NAT_DEX_MAPPING) ?
+            GameData::NAT_DEX_MAPPING : {}
+          split_names = defined?(GameData::SPLIT_NAMES) ?
+            GameData::SPLIT_NAMES : {}
+          body_dex = mapping[body_number] || body_number
+          head_dex = mapping[head_number] || head_number
+          prefix = Array(split_names[head_dex])[0]
+          suffix = Array(split_names[body_dex])[1]
+          if prefix && suffix
+            prefix = prefix[0...-1] if prefix[-1] == suffix[0]
+            return prefix + suffix
+          end
+          head = GameData::Species.get(head_number).name
+          body = GameData::Species.get(body_number).name
+          "#{head}/#{body}"
+        rescue StandardError
+          _INTL("Unknown Pokemon")
         end
 
         def global_mapping_enabled?

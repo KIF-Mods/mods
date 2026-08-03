@@ -34,11 +34,12 @@ changes shows the newly active table. Rare Signal selection remains map-wide
 and does not change with the time period.
 
 KIF's Static Encounter randomizer runs after a species has been selected for
-battle. Wild Link applies that same final mapping to Global, Area, Rare Signal,
-and generic Rock Smash fallback species before displaying or generating the
-target. If another system has compatibly extended the live Area encounter
-table, Wild Link keeps those additions instead of replacing the live table with
-the saved randomized table.
+battle. Wild Link applies that same final mapping to Global, Area, and generic
+Rock Smash fallback species before displaying or generating the target.
+Authored Rare Signals instead follow the live Poke Radar rare-species API so
+they remain consistent with the actual Poke Radar encounter. If another system
+has compatibly extended the live Area encounter table, Wild Link keeps those
+additions instead of replacing the live table with the saved randomized table.
 
 Dynamic Pokemon is deliberately different. Its encounter result is rerolled
 after a table slot is selected, so those transient species are not recorded or
@@ -70,21 +71,28 @@ fallback species. It never borrows species from Cave or Land tables.
 
 - Unseen standard Pokemon appear as silhouettes and cannot be selected.
 - Seen Pokemon can be searched.
-- Caught Pokemon use colored icons and unlock full scan details.
+- Caught Pokemon use colored previews and unlock full scan details.
+- The global `Sprites` option switches detail previews between `Icons` and
+  `Full Sprites`. It defaults to `Full Sprites` and does not inherit KIF's Big
+  Icons mode.
 - Search Level is permanent and stored per exact species or fusion.
 - Search Level is capped at 999.
 - Exact fusion identities supplied by the active Global or Area randomized
   encounter table appear as normal searchable entries.
 - Rare Signal uses KIF's native `Settings::POKE_RADAR_ENCOUNTERS` data when
   the current map has an authored Poké Radar species.
+- Authored Poké Radar species remain unchanged by encounter randomization so
+  Wild Link and the native Poké Radar identify the same map-exclusive species.
 - Maps without an authored rare species receive a deterministic fallback. Wild
   Link calculates the encounter-rate-weighted average BST of the effective
   map-wide Land roster across all time periods, targets approximately 50 BST
   above that average, excludes its normal species and legendaries, and chooses
   from the twelve closest matches. The fallback uses the map's Land level range
   and updates when its effective randomized encounter table changes.
-- Rare Signal unlocks after every standard Land encounter on the map has been
-  seen.
+- Rare Signal unlocks after every standard Pokemon in the currently displayed
+  time-appropriate Land roster has been seen. Before then, the Rare Signal row
+  remains hidden and does not contribute to the method's Seen, Caught, or total
+  counts. Catching every standard species is not required.
 - An encountered Rare Signal species joins the normal searchable roster.
 
 ## Target Lifecycle
@@ -185,16 +193,18 @@ encounter.
 
 ## Map Diagnostics
 
-`Gather Map Data` in Wild Link settings creates
+`Gather Map Data` under `Developer / Utility` creates
 `KantoReloaded/Logging/WildLinkMapData.txt`, uploads the sanitized report,
 and copies a Discord-ready link when clipboard access is available. It does
 not open the Kanto Reloaded bug-report thread.
 
 The report snapshots the current map ID, name, dimensions, metadata, player
 map position and terrain, field tools, terrain-tag counts, map events, Wild
-Link method eligibility, and every active encounter table. It is intended for
-diagnosing missing Surf, Fishing, Headbutt, Rock Smash, Land, or Cave methods.
-The report does not include save contents or player identity.
+Link method eligibility, every active encounter table, and Weather System
+eligibility, ownership, cell membership, current state, next forecast, and
+Town Map position conflicts. It is intended for diagnosing map-dependent
+Wild Link and weather behavior. The report does not include save contents or
+player identity.
 
 ## Scan Unlocks
 
@@ -399,10 +409,11 @@ The result is capped at KIF's normal maximum level.
   target. Dynamic rerolls wrap KIF's normal `choose_wild_pokemon` path, while
   Wild Link directly generates the species explicitly selected in its roster.
 - Wild Link uses the same demand-driven loading model as Reloaded PC. Only the
-  currently selected preview is requested, source graphics are reused through
-  KIF's native bitmap cache, and completed previews remain in a bounded KR
-  memory cache between Wild Link scene openings during the current game
-  session.
+  currently selected preview is requested. The initially selected row is
+  prepared before the completed scene becomes visible, source graphics are
+  reused through KIF's native bitmap cache, and completed previews remain in a
+  bounded KR memory cache between Wild Link scene openings during the current
+  game session.
 - Wild Link does not generate an entire map roster or export preview PNGs while
   the scene is open. A newly selected species can incur its normal first-load
   cost, but stopping list navigation cannot trigger a bulk loading pass.
@@ -410,6 +421,10 @@ The result is capped at KIF's normal maximum level.
   bitmap copy rather than KIF's per-pixel temporary-file generator. This path
   is scoped to Wild Link previews and does not replace native PC, party, or
   battle sprite behavior.
+- Full-sprite previews use KIF's native species and fusion battler resolver,
+  crop transparent padding, and fit the selected sprite into the existing
+  detail area. They retain the same selected-row demand loading and bounded
+  cache behavior as icon previews.
 - Fusion targets retain the exact fusion for battle and use the body Pokemon's
   dark silhouette in the overworld.
 - If a target species does not have an overworld follower graphic, Wild Link

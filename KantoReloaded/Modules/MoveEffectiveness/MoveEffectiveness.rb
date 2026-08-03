@@ -184,9 +184,14 @@ module KantoReloaded
       end
 
       def palette_color(index)
-        entry = PALETTE[index.to_i] || PALETTE.first
+        normalized = index.to_i
+        normalized = 0 unless PALETTE[normalized]
+        @palette_color_cache ||= {}
+        return @palette_color_cache[normalized] if
+          @palette_color_cache[normalized]
+        entry = PALETTE[normalized]
         rgb = entry[:rgb]
-        Color.new(rgb[0], rgb[1], rgb[2])
+        @palette_color_cache[normalized] = Color.new(rgb[0], rgb[1], rgb[2])
       end
 
       def border_color(effectiveness_class)
@@ -202,7 +207,9 @@ module KantoReloaded
         when :quarter
           setting_color(QUARTER_COLOR_SETTING, DEFAULT_QUARTER_COLOR)
         when :immune
-          Color.new(IMMUNE_COLOR[0], IMMUNE_COLOR[1], IMMUNE_COLOR[2])
+          @immune_color ||= Color.new(
+            IMMUNE_COLOR[0], IMMUNE_COLOR[1], IMMUNE_COLOR[2]
+          )
         else
           nil
         end

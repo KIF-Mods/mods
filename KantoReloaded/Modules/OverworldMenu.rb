@@ -132,6 +132,8 @@ module OverworldMenu
                    end
 
   @registry = []
+  @features = []
+  @companion_panels = []
   @legacy_registrations = KantoReloaded::LEGACY_OVERWORLD_MENU_ENTRIES.dup
   @fallback_pages = nil
   @fallback_page_index = 0
@@ -216,6 +218,69 @@ module OverworldMenu
 
     def registry
       @registry
+    end
+
+    def register_feature(key, options = nil, **keywords)
+      data = options.is_a?(Hash) ? options.dup : {}
+      keywords.each { |name, value| data[name] = value }
+      normalized_key = key.to_sym rescue nil
+      label = data[:label] || data["label"]
+      getter = data[:get] || data["get"]
+      setter = data[:set] || data["set"]
+      return false unless normalized_key && label.is_a?(String) &&
+                          !label.empty? && getter.respond_to?(:call) &&
+                          setter.respond_to?(:call)
+      return false if @features.any? { |entry| entry[:key] == normalized_key }
+      @features << {
+        :key => normalized_key,
+        :label => label,
+        :priority => (data[:priority] || data["priority"] || 99).to_i,
+        :condition => data[:condition] || data["condition"] || proc { true },
+        :get => getter,
+        :set => setter
+      }
+      @features.sort_by! { |entry| [entry[:priority], entry[:label]] }
+      true
+    rescue StandardError => e
+      log_exception("Overworld Menu feature registration failed", e)
+      false
+    end
+
+    def available_features
+      @features.select { |entry| entry[:condition].call rescue false }
+    end
+
+    def register_companion_panel(key, options = nil, **keywords)
+      data = options.is_a?(Hash) ? options.dup : {}
+      keywords.each { |name, value| data[name] = value }
+      normalized_key = key.to_sym rescue nil
+      drawer = data[:draw] || data["draw"]
+      height = (data[:height] || data["height"]).to_i
+      return false unless normalized_key && drawer.respond_to?(:call) &&
+                          height > 0
+      return false if @companion_panels.any? do |entry|
+        entry[:key] == normalized_key
+      end
+      @companion_panels << {
+        :key => normalized_key,
+        :priority => (data[:priority] || data["priority"] || 99).to_i,
+        :height => height,
+        :condition => data[:condition] || data["condition"] || proc { true },
+        :draw => drawer
+      }
+      @companion_panels.sort_by! do |entry|
+        [entry[:priority], entry[:key].to_s]
+      end
+      true
+    rescue StandardError => e
+      log_exception("Overworld Menu companion panel registration failed", e)
+      false
+    end
+
+    def available_companion_panels
+      @companion_panels.select do |entry|
+        entry[:condition].call rescue false
+      end
     end
 
     def available_entries
@@ -442,6 +507,14 @@ module OverworldMenu
       false
     end
 
+    def update_live_underlay
+      pbUpdateSceneMap if defined?(pbUpdateSceneMap)
+      true
+    rescue StandardError => e
+      log_exception("Overworld Menu live underlay update failed", e)
+      false
+    end
+
     def log_info(message)
       KantoReloaded::Log.info(message, :modules) if defined?(KantoReloaded::Log)
     rescue
@@ -521,6 +594,13 @@ module OverworldMenu
 end
 
 KantoReloaded.const_set(:OverworldMenu, OverworldMenu) unless KantoReloaded.const_defined?(:OverworldMenu, false)
+OverworldMenu.register_feature(
+  :party_view,
+  :label => "Party View",
+  :priority => 10,
+  :get => proc { OverworldMenu.party_view },
+  :set => proc { |value| OverworldMenu.party_view = value }
+)
 KantoReloaded::OverworldMenuFeature.install if defined?(KantoReloaded::OverworldMenuFeature)
 
 module KantoReloaded
@@ -573,11 +653,13 @@ class OverworldMenuScene
     @menu_spr.z = 10
     @party_spr = Sprite.new(@vp)
     @party_spr.z = 10
+    @companion_sprites = {}
     @popup_spr = nil
     @icon_sprites = []
     @party_view = false
     @last_h = 0
     @last_ph = 0
+    @next_companion_refresh = 0
   end
 
   def setup(party_view: false)
@@ -655,6 +737,7 @@ class OverworldMenuScene
     @menu_spr.x = PANEL_X
     @menu_spr.y = PANEL_Y
     draw_party_panel if @party_view
+    draw_companion_panels
   end
 
   def entry_status_text(entry)
@@ -799,6 +882,7 @@ class OverworldMenuScene
       loop do
         Graphics.update
         Input.update
+        OverworldMenu.update_live_underlay
         if Input.repeat?(Input::UP)
           hour = (hour + 1) % 24
           redraw_popup(spr, "TIME CHANGER", build.call(hour) + [hint])
@@ -820,16 +904,24 @@ class OverworldMenuScene
     end
   end
 
-  def show_features_menu(party_view_on)
+  def show_features_menu(_party_view_on = nil)
     cursor = 0
     result = nil
-    build_items = proc { ["Party View: #{party_view_on ? 'ON ' : 'OFF'}", "Customize Pages", "Back"] }
+    build_items = proc do
+      feature_rows = OverworldMenu.available_features.map do |feature|
+        enabled = feature[:get].call rescue false
+        "#{feature[:label]}: #{enabled ? 'ON ' : 'OFF'}"
+      end
+      feature_rows + ["Customize Pages", "Back"]
+    end
     with_popup("OVERWORLD MENU FEATURES", [], dismissible: false) do |spr|
       loop do
+        features = OverworldMenu.available_features
         items = build_items.call
         redraw_features(spr, items, cursor)
         Graphics.update
         Input.update
+        OverworldMenu.update_live_underlay
         if Input.repeat?(Input::UP)
           cursor = (cursor - 1) % items.length
           pbPlayCursorSE
@@ -837,13 +929,15 @@ class OverworldMenuScene
           cursor = (cursor + 1) % items.length
           pbPlayCursorSE
         elsif Input.trigger?(Input::USE) || input_c?
-          if cursor == 0
-            party_view_on = !party_view_on
-            toggle_party_view(party_view_on)
-            result = { :party_view => party_view_on }
+          if cursor < features.length
+            feature = features[cursor]
+            current = feature[:get].call rescue false
+            feature[:set].call(!current)
+            toggle_party_view(OverworldMenu.party_view)
+            draw_companion_panels
             pbPlayDecisionSE
-          elsif cursor == 1
-            result = { :customize_pages => true, :party_view => party_view_on }
+          elsif cursor == features.length
+            result = { :customize_pages => true }
             pbPlayDecisionSE
             break
           else
@@ -964,6 +1058,7 @@ class OverworldMenuScene
     loop do
       Graphics.update
       Input.update
+      OverworldMenu.update_live_underlay
       if Input.repeat?(Input::UP)
         cursor = (cursor - 1) % labels.length
         pbPlayCursorSE
@@ -1004,6 +1099,11 @@ class OverworldMenuScene
 
   def dispose
     dispose_icon_sprites
+    @companion_sprites.each_value do |sprite|
+      sprite.bitmap.dispose rescue nil
+      sprite.dispose rescue nil
+    end
+    @companion_sprites.clear
     [@menu_spr, @party_spr, @popup_spr].each do |sprite|
       next unless sprite
       sprite.bitmap.dispose rescue nil
@@ -1031,6 +1131,14 @@ class OverworldMenuScene
     @icon_sprites.each { |sprite| sprite.update rescue nil }
   end
 
+  def update_companion_panels
+    frame = Graphics.frame_count.to_i rescue 0
+    return if frame < @next_companion_refresh.to_i
+    rate = Graphics.frame_rate.to_i rescue 40
+    @next_companion_refresh = frame + [rate, 1].max
+    draw_companion_panels
+  end
+
   def run_with_overlay_hidden
     with_overlay_hidden { yield }
   end
@@ -1040,13 +1148,21 @@ class OverworldMenuScene
   def with_overlay_hidden
     menu_visible = @menu_spr.visible rescue true
     party_visible = @party_spr.visible rescue false
+    companion_visibility = {}
+    @companion_sprites.each do |key, sprite|
+      companion_visibility[key] = sprite.visible rescue false
+    end
     @menu_spr.visible = false rescue nil
     @party_spr.visible = false rescue nil
+    @companion_sprites.each_value { |sprite| sprite.visible = false rescue nil }
     @icon_sprites.each { |sprite| sprite.visible = false rescue nil }
     yield
   ensure
     @menu_spr.visible = menu_visible rescue nil
     @party_spr.visible = party_visible rescue nil
+    @companion_sprites.each do |key, sprite|
+      sprite.visible = companion_visibility[key] rescue nil
+    end
     @icon_sprites.each { |sprite| sprite.visible = @party_view rescue nil }
     Graphics.update rescue nil
   end
@@ -1061,6 +1177,47 @@ class OverworldMenuScene
     if defined?(KantoReloaded::UI::QuickMenuStyle)
       KantoReloaded::UI::QuickMenuStyle.draw_panel(bitmap, width, height, title)
     end
+  end
+
+  def draw_companion_panels
+    panels = OverworldMenu.available_companion_panels
+    active_keys = []
+    width = PANEL_X - PARTY_X - 4
+    y = PANEL_Y
+    y += party_panel_h + 4 if @party_view
+    panels.each do |panel|
+      height = panel[:height].to_i
+      break if y + height > SH - 3
+      key = panel[:key]
+      active_keys << key
+      sprite = @companion_sprites[key]
+      unless sprite
+        sprite = Sprite.new(@vp)
+        sprite.z = 10
+        @companion_sprites[key] = sprite
+      end
+      if !sprite.bitmap || sprite.bitmap.width != width ||
+         sprite.bitmap.height != height
+        sprite.bitmap.dispose rescue nil
+        sprite.bitmap = Bitmap.new(width, height)
+      end
+      sprite.x = PARTY_X
+      sprite.y = y
+      sprite.visible = true
+      panel[:draw].call(
+        self, sprite,
+        { :x => PARTY_X, :y => y, :width => width, :height => height }
+      )
+      y += height + 4
+    rescue StandardError => e
+      OverworldMenu.log_exception(
+        "Overworld Menu companion panel #{panel[:key]} failed", e
+      )
+    end
+    @companion_sprites.each do |key, sprite|
+      sprite.visible = false unless active_keys.include?(key)
+    end
+    true
   end
 
   def popup_h(lines)
@@ -1128,6 +1285,7 @@ class OverworldMenuScene
       pbDrawShadowText(bitmap, PAD + 2, y + 2, POPUP_W - PAD * 2, 16, label, color, C_SHADOW)
     end
     sprite.bitmap = bitmap
+    sprite.y = (SH - height) / 2
     Graphics.update
   end
 
@@ -1135,6 +1293,7 @@ class OverworldMenuScene
     loop do
       Graphics.update
       Input.update
+      OverworldMenu.update_live_underlay
       break if Input.trigger?(Input::USE) || Input.trigger?(Input::BACK) || input_c?
     end
   end
@@ -1213,6 +1372,7 @@ class OverworldMenuPageEditorScene
     loop do
       Graphics.update
       Input.update
+      OverworldMenu.update_live_underlay
       break unless @running
       handle_input
     end
@@ -1578,6 +1738,7 @@ class OverworldMenuPageEditorScene
     loop do
       Graphics.update
       Input.update
+      OverworldMenu.update_live_underlay
       if Input.repeat?(Input::UP)
         cursor = (cursor - 1) % commands.length
         pbPlayCursorSE
@@ -1689,11 +1850,7 @@ class OverworldMenuScreen
   end
 
   def show_features_menu
-    party_now = OverworldMenu.party_view
-    result = @scene.show_features_menu(party_now)
-    if result && result.has_key?(:party_view)
-      OverworldMenu.party_view = result[:party_view]
-    end
+    result = @scene.show_features_menu
     OverworldMenuPageEditorScene.new.main if result && result[:customize_pages]
   end
 
@@ -1759,7 +1916,9 @@ class OverworldMenuScreen
     loop do
       Graphics.update
       Input.update
+      OverworldMenu.update_live_underlay
       @scene.update_icons
+      @scene.update_companion_panels
       if Input.repeat?(Input::UP) && !entries.empty?
         cursor = (cursor - 1) % entries.length
         scroll = cursor if cursor < scroll

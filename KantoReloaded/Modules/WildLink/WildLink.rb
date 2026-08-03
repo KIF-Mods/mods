@@ -48,7 +48,7 @@ module KantoReloaded
         current = Runtime.target
         return _INTL("Ready") unless current
         name = current[:unknown] ? _INTL("Rare Signal") :
-          GameData::Species.get(current[:species]).name
+          EncounterPools.species_name(current[:species])
         _INTL("{1} / Chain {2}", name, WildLink.runtime.chain)
       rescue StandardError
         _INTL("Ready")
@@ -72,6 +72,19 @@ module KantoReloaded
             }
           }
         })
+        KantoReloaded::Settings.register(MAP_DATA_ACTION, {
+          :name => "Gather Map Data",
+          :description => "Create and upload map, encounter, Wild Link, and weather diagnostics.",
+          :type => :button,
+          :category => :utility,
+          :owner => :kanto_reloaded,
+          :priority => 15,
+          :searchable => [
+            "map", "metadata", "encounters", "wild link", "weather",
+            "diagnostics", "export"
+          ],
+          :on_press => proc { KantoReloaded::WildLink::MapData.file }
+        })
         KantoReloaded::Settings.register(CONTINUE_SETTING, {
           :name => "Continue Search",
           :description => "Choose what happens after a successful Wild Link battle.",
@@ -82,6 +95,17 @@ module KantoReloaded
           :owner => MODULE_ID,
           :priority => 10
         })
+        KantoReloaded::Settings.register(SPRITES_SETTING, {
+          :name => "Sprites",
+          :description => "Show Pokemon icons or full battle sprites in Wild Link previews.",
+          :type => :enum,
+          :values => ["Icons", "Full Sprites"],
+          :default => SPRITES_FULL,
+          :category => :gameplay,
+          :owner => MODULE_ID,
+          :scope => :global,
+          :priority => 20
+        })
         KantoReloaded::Settings.register(MESSAGES_SETTING, {
           :name => "Messages",
           :description => "Show optional Wild Link prompts, warnings, and notifications.",
@@ -89,8 +113,14 @@ module KantoReloaded
           :default => 1,
           :category => :gameplay,
           :owner => MODULE_ID,
-          :priority => 20
+          :priority => 30
         })
+        KantoReloaded::Settings.register_on_change(
+          SPRITES_SETTING, :wild_link_preview_cache,
+          :owner => MODULE_ID
+        ) do |_value, _old_value, _definition|
+          KantoReloaded::WildLink::UI::PreviewCache.clear
+        end
         true
       end
 

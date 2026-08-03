@@ -45,6 +45,13 @@ module KantoReloaded
       "Modules/DoubleAbilities/GeneralizedAbilities.rb",
       "Modules/DoubleAbilities/Integration.rb",
       "Modules/OverworldMenu.rb",
+      "Modules/WeatherSystem/WeatherData.rb",
+      "Modules/WeatherSystem/WeatherSimulation.rb",
+      "Modules/WeatherSystem/WeatherAudio.rb",
+      "Modules/WeatherSystem/WeatherForecastUI.rb",
+      "Modules/WeatherSystem/WeatherAlerts.rb",
+      "Modules/WeatherSystem/WeatherMultiplayer.rb",
+      "Modules/WeatherSystem/WeatherSystem.rb",
       "Modules/BattleMenu.rb",
       "Modules/BattleUI.rb",
       "Modules/MoveEffectiveness/MoveEffectiveness.rb",
@@ -110,7 +117,8 @@ module KantoReloaded
       "Modules/QualityAssurance/NatureSelector.rb",
       "Modules/QualityAssurance/LevelLocking.rb",
       "Modules/QualityAssurance/LevelLockManager.rb",
-      "Modules/QualityAssurance/SuperCandy.rb"
+      "Modules/QualityAssurance/SuperCandy.rb",
+      "Modules/Developer/TimingProfiler.rb"
     ].freeze
 
     def self.files

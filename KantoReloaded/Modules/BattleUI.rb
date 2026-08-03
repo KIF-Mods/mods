@@ -20,6 +20,8 @@ module KantoReloaded
     EBDX_BAG_BACK_BOUNDS_IVAR = :@kanto_reloaded_ebdx_bag_back_bounds
     EBDX_BAG_VISIBLE_IVAR = :@kanto_reloaded_ebdx_bag_visible
     EBDX_BAG_OWNER_IVAR = :@kanto_reloaded_ebdx_bag_owner
+    EBDX_TARGET_ICON_CACHE_IVAR = :@kanto_reloaded_ebdx_target_icon_cache
+    EBDX_TARGET_ICON_NEXT_SCAN_IVAR = :@kanto_reloaded_ebdx_target_icon_next_scan
 
     class BorderSprite < Sprite
       attr_reader :active
@@ -149,8 +151,9 @@ module KantoReloaded
           KantoReloaded::BattleUI.redraw_ebdx_target_icons(self, texts)
           result
         end
+        target_cache = install_target_icon_cache_hooks
         @installed = settings && commands && bags &&
-          generated && updated && target_icons
+          generated && updated && target_icons && target_cache
       rescue StandardError => e
         log_exception("EBDX battle UI failed to install", e)
         false
@@ -316,20 +319,25 @@ module KantoReloaded
         buttons = window.instance_variable_get(:@buttons)
         battle = window.instance_variable_get(:@battle)
         return false unless buttons.is_a?(Hash) && battle
-        path = window.instance_variable_get(:@path).to_s
-        image = window.instance_variable_get(:@btnImg).to_s
-        background = pbBitmap(path + image)
+        overrides = []
         buttons.each do |key, button|
-          next unless button && button.bitmap
-          button.bitmap.clear
-          button.bitmap.blt(0, 0, background, background.rect)
           index = key.to_i
+          next unless button && button.bitmap
           next if Array(texts)[index].nil?
           battler = Array(battle.battlers)[index]
           next unless battler && battler.hp.to_i > 0
           pokemon = battler.displayPokemon
-          next unless pokemon
-          draw_ebdx_target_icon(button.bitmap, pokemon)
+          next unless pokemon && target_icon_override_needed?(pokemon)
+          overrides << [button, pokemon]
+        end
+        return true if overrides.empty?
+        path = window.instance_variable_get(:@path).to_s
+        image = window.instance_variable_get(:@btnImg).to_s
+        background = pbBitmap(path + image)
+        overrides.each do |button, pokemon|
+          button.bitmap.clear
+          button.bitmap.blt(0, 0, background, background.rect)
+          draw_ebdx_target_icon(button.bitmap, pokemon, window)
         end
         true
       rescue StandardError => e
@@ -470,6 +478,36 @@ module KantoReloaded
         results.all?
       end
 
+      def install_target_icon_cache_hooks
+        return false unless defined?(PokeBattle_SceneEBDX)
+        results = []
+        results << KantoReloaded::Hooks.wrap(
+          PokeBattle_SceneEBDX,
+          :pbUpdate,
+          :ebdx_target_icon_cache_prewarm
+        ) do |hook, *_arguments|
+          result = hook.call
+          KantoReloaded::BattleUI.send(
+            :prewarm_ebdx_target_icons, self
+          )
+          result
+        end
+        results << KantoReloaded::Hooks.wrap(
+          TargetWindowEBDX,
+          :dispose,
+          :ebdx_target_icon_cache_dispose
+        ) do |hook, *_arguments|
+          begin
+            hook.call
+          ensure
+            KantoReloaded::BattleUI.send(
+              :dispose_ebdx_target_icon_cache, self
+            )
+          end
+        end
+        results.all?
+      end
+
       def ensure_ebdx_command_border(window, button)
         size = [button.src_rect.width.to_i, button.src_rect.height.to_i]
         border = window.instance_variable_get(EBDX_COMMAND_BORDER_IVAR)
@@ -575,11 +613,53 @@ module KantoReloaded
         false
       end
 
-      def draw_ebdx_target_icon(bitmap, pokemon)
-        icon = TargetIconSprite.new(pokemon)
-        source = icon.src_rect
-        return false unless icon.bitmap && source &&
-          source.width > 0 && source.height > 0
+      def prewarm_ebdx_target_icons(scene)
+        window = scene.instance_variable_get(:@targetWindow)
+        return false unless window && window.is_a?(TargetWindowEBDX)
+        battle = window.instance_variable_get(:@battle)
+        return false unless battle
+        frame = Graphics.frame_count rescue 0
+        next_scan = window.instance_variable_get(
+          EBDX_TARGET_ICON_NEXT_SCAN_IVAR
+        ).to_i
+        return false if frame < next_scan
+        Array(battle.battlers).compact.each do |battler|
+          pokemon = battler.displayPokemon rescue nil
+          next unless pokemon && target_icon_override_needed?(pokemon)
+          key = target_icon_cache_key(pokemon)
+          cache = target_icon_cache(window)
+          next if cache[key] && !cache[key].disposed?
+          target_icon_bitmap(window, pokemon)
+          window.instance_variable_set(
+            EBDX_TARGET_ICON_NEXT_SCAN_IVAR, frame + 15
+          )
+          return true
+        end
+        window.instance_variable_set(
+          EBDX_TARGET_ICON_NEXT_SCAN_IVAR, frame + 15
+        )
+        false
+      rescue StandardError => e
+        log_exception("EBDX target icon prewarm failed", e)
+        false
+      end
+
+      def dispose_ebdx_target_icon_cache(window)
+        cache = window.instance_variable_get(EBDX_TARGET_ICON_CACHE_IVAR)
+        cache.each_value do |bitmap|
+          bitmap.dispose if bitmap && !bitmap.disposed?
+        end if cache.is_a?(Hash)
+        window.instance_variable_set(EBDX_TARGET_ICON_CACHE_IVAR, {})
+        window.instance_variable_set(EBDX_TARGET_ICON_NEXT_SCAN_IVAR, 0)
+        true
+      rescue StandardError
+        false
+      end
+
+      def draw_ebdx_target_icon(bitmap, pokemon, window)
+        icon_bitmap = target_icon_bitmap(window, pokemon)
+        return false unless icon_bitmap && !icon_bitmap.disposed?
+        source = icon_bitmap.rect
         maximum_size = [
           EBDX_TARGET_ICON_SIZE,
           bitmap.width - 4,
@@ -597,10 +677,55 @@ module KantoReloaded
           width,
           height
         )
-        bitmap.stretch_blt(destination, icon.bitmap, source, 216)
+        bitmap.stretch_blt(destination, icon_bitmap, source, 216)
         true
+      end
+
+      def target_icon_bitmap(window, pokemon)
+        cache = target_icon_cache(window)
+        key = target_icon_cache_key(pokemon)
+        cached = cache[key]
+        return cached if cached && !cached.disposed?
+        icon = TargetIconSprite.new(pokemon)
+        source = icon.src_rect
+        return nil unless icon.bitmap && source &&
+                          source.width > 0 && source.height > 0
+        cached = Bitmap.new(source.width, source.height)
+        cached.blt(0, 0, icon.bitmap, source)
+        cache[key] = cached
       ensure
         icon.dispose if icon && !icon.disposed?
+      end
+
+      def target_icon_cache(window)
+        cache = window.instance_variable_get(EBDX_TARGET_ICON_CACHE_IVAR)
+        unless cache.is_a?(Hash)
+          cache = {}
+          window.instance_variable_set(EBDX_TARGET_ICON_CACHE_IVAR, cache)
+        end
+        cache
+      end
+
+      def target_icon_cache_key(pokemon)
+        [
+          pokemon.object_id,
+          pokemon.species,
+          (pokemon.form rescue 0),
+          (pokemon.spriteform_head rescue nil),
+          (pokemon.spriteform_body rescue nil),
+          (pokemon.shiny? rescue false),
+          (pokemon.shinyValue? rescue nil),
+          (pokemon.kuraycustomfile? rescue nil)
+        ]
+      end
+
+      def target_icon_override_needed?(pokemon)
+        return true if pokemon.respond_to?(:isFusion?) && pokemon.isFusion?
+        filename = GameData::Species.icon_filename_from_pokemon(pokemon)
+        return true if filename.nil?
+        filename.to_s.downcase.include?("icondna")
+      rescue
+        true
       end
 
       def log_exception(message, error)

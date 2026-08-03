@@ -299,11 +299,19 @@ module KantoReloaded
       end
 
       def apply_callbacks(reason = :refresh)
+        previous_reason = @callback_application_reason
+        @callback_application_reason = reason.to_sym
         @definitions.each_key do |key|
           invoke_callbacks(key, get(key, nil), nil)
         end
         emit(:kanto_reloaded_settings_applied, :reason => reason)
         true
+      ensure
+        @callback_application_reason = previous_reason
+      end
+
+      def callback_application_reason
+        @callback_application_reason
       end
 
       def module_key(module_id, key)
